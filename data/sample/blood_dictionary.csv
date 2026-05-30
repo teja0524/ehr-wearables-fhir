@@ -1,0 +1,52 @@
+variable,form,type,label,units_or_choices,min,max,redcap_status,notes
+subject_id,blood_labs,string,Subject pseudonym,Format MFU-XXXX,,,proposed_new,Join key.
+visit_id,blood_labs,string,Baseline visit id,Format {subject_id}_start,,,proposed_new,Blood drawn once at baseline.
+visit_date,blood_labs,date,Blood collection date,ISO-8601 YYYY-MM-DD,,,existing_in_redcap,REDCap form blood_exams uses 'Datum odvzema' (collection date).
+cbc_leuko,blood_labs,numeric,Leukocytes count,10^9/L,2.5,12.0,existing_in_redcap,"Adult reference 4.0-11.0; lower in lymphopenia, higher in inflammation/infection."
+cbc_eryt,blood_labs,numeric,Erythrocytes count,10^12/L,3.0,6.0,existing_in_redcap,Sex-dependent: F 3.8-5.0; M 4.3-5.7.
+cbc_hemo,blood_labs,numeric,Hemoglobin,g/L,100,175,existing_in_redcap,F 120-160; M 135-175. Anemia <120 F / <130 M.
+cbc_hema,blood_labs,numeric,Hematocrit,L/L,0.3,0.5,existing_in_redcap,F 0.36-0.46; M 0.40-0.50.
+cbc_mcv,blood_labs,numeric,Mean corpuscular volume,fL,78,102,existing_in_redcap,Reference 80-100.
+cbc_mch,blood_labs,numeric,Mean corpuscular hemoglobin,pg,26,34,existing_in_redcap,Reference 27-33.
+cbc_mchc,blood_labs,numeric,Mean corpuscular hemoglobin concentration,g/L,310,360,existing_in_redcap,Reference 320-360.
+cbc_plat,blood_labs,numeric,Platelet count,10^9/L,100,450,existing_in_redcap,Reference 150-400.
+cbc_mpv,blood_labs,numeric,Mean platelet volume,fL,7.0,13.0,existing_in_redcap,Reference 7.5-12.0.
+cbc_neutrophil_count,blood_labs,numeric,Neutrophil absolute count,10^9/L,1.0,8.0,proposed_new,Differential not in REDCap blood_exams form. Reference 1.8-7.5.
+cbc_lymphocyte_count,blood_labs,numeric,Lymphocyte absolute count,10^9/L,0.5,4.0,proposed_new,Reference 1.0-4.0.
+cbc_monocyte_count,blood_labs,numeric,Monocyte absolute count,10^9/L,0.1,1.0,proposed_new,Reference 0.2-0.8.
+cbc_eosinophil_count,blood_labs,numeric,Eosinophil absolute count,10^9/L,0.0,1.5,proposed_new,Reference 0.0-0.5.
+cbc_basophil_count,blood_labs,numeric,Basophil absolute count,10^9/L,0.0,0.2,proposed_new,Reference 0.0-0.2.
+cbc_neutrophil_pct,blood_labs,numeric,Neutrophils,%,30,80,proposed_new,Reference 40-70.
+cbc_lymphocyte_pct,blood_labs,numeric,Lymphocytes,%,10,50,proposed_new,Reference 20-45.
+cbc_monocyte_pct,blood_labs,numeric,Monocytes,%,4,14,proposed_new,Reference 4-12.
+cbc_eosinophil_pct,blood_labs,numeric,Eosinophils,%,0,22,proposed_new,Reference 0-7.
+cbc_basophil_pct,blood_labs,numeric,Basophils,%,0,1.5,proposed_new,Reference 0-1.
+crp_b,blood_labs,numeric,C-reactive protein,mg/L,0,15,existing_in_redcap,"Inflammation marker; ≤5 healthy, ≥10 marked inflammation."
+glucose_b,blood_labs,numeric,Fasting glucose,mmol/L,3.5,12,existing_in_redcap,Fasting normal <6.0; impaired 6.1-6.9; diabetes ≥7.0.
+hba1c_b,blood_labs,numeric,HbA1c,%,4.0,9.0,existing_in_redcap,Normal <5.7; prediabetes 5.7-6.4; diabetes ≥6.5.
+hba1c_b_2,blood_labs,numeric,HbA1c,mmol/mol,20,75,existing_in_redcap,IFCC unit. Derived from hba1c_b via 10.93*pct - 23.5.
+creat_b,blood_labs,numeric,Serum creatinine,µmol/L,40,200,existing_in_redcap,Reference F 50-90; M 60-110. Elevated in renal impairment.
+ogf_b,blood_labs,numeric,Estimated glomerular filtration rate (eGFR),mL/min/1.73m^2,25,120,existing_in_redcap,<60 indicates chronic kidney disease.
+tot_chol_b,blood_labs,numeric,Total cholesterol,mmol/L,2.5,8.0,existing_in_redcap,Desirable <5.0; borderline 5.0-6.2; high ≥6.2.
+hdl_chol_b,blood_labs,numeric,HDL cholesterol,mmol/L,0.7,2.5,existing_in_redcap,Higher is protective; F ≥1.3 desirable; M ≥1.0 desirable.
+nonhdl_chol_b,blood_labs,numeric,Non-HDL cholesterol,mmol/L,1.0,6.5,existing_in_redcap,Total - HDL. Desirable <3.4.
+trig_b,blood_labs,numeric,Triglycerides,mmol/L,0.4,4.5,existing_in_redcap,Normal <1.7; borderline 1.7-2.2; high ≥2.3.
+ldl_chol_b,blood_labs,numeric,LDL cholesterol,mmol/L,0.5,6.0,existing_in_redcap,Optimal <2.6; near-optimal 2.6-3.3; borderline 3.4-4.0; high ≥4.1.
+insulin_b,blood_labs,numeric,Fasting insulin,mE/L,2.0,25.0,existing_in_redcap,Reference 2-15.
+homa_b,blood_labs,numeric,HOMA-IR index,(insulin*glucose)/22.5,0.3,10,existing_in_redcap,Insulin-resistance proxy; >2.5 suggests resistance.
+subject_id,blood_cytokines,string,Subject pseudonym,Format MFU-XXXX,,,proposed_new,Join key.
+visit_id,blood_cytokines,string,Baseline visit id,Format {subject_id}_start,,,proposed_new,Cytokines measured once at baseline.
+visit_date,blood_cytokines,date,Sample collection date,ISO-8601 YYYY-MM-DD,,,existing_in_redcap,
+il6_b,blood_cytokines,numeric,Interleukin-6,pg/mL,0,15,proposed_new,"Pro-inflammatory; elevated in chronic inflammation, dementia, frailty. Healthy 1-7; inflamed 7-30. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file."
+tnfa_b,blood_cytokines,numeric,Tumor necrosis factor alpha,pg/mL,0,12,proposed_new,Pro-inflammatory. Healthy 1-10. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il1b_b,blood_cytokines,numeric,Interleukin-1 beta,pg/mL,0,2,proposed_new,Pro-inflammatory; innate immunity. Healthy 0.1-1. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il8_b,blood_cytokines,numeric,Interleukin-8 / CXCL8,pg/mL,0,40,proposed_new,Neutrophil chemoattractant. Healthy 5-20. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il10_b,blood_cytokines,numeric,Interleukin-10,pg/mL,0,5,proposed_new,Anti-inflammatory; co-elevated with pro-inflammatory in chronic disease. Healthy 0.5-3. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+mcp1_b,blood_cytokines,numeric,Monocyte chemoattractant protein-1 / CCL2,pg/mL,0,800,proposed_new,"Monocyte/macrophage recruiter; elevated in inflammation, obesity, AD. Healthy 100-400. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file."
+ifng_b,blood_cytokines,numeric,Interferon gamma,pg/mL,0,5,proposed_new,Th1 effector. Healthy 0.5-3. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il12p70_b,blood_cytokines,numeric,Interleukin-12 p70,pg/mL,0,2,proposed_new,Pro-inflammatory bioactive heterodimer. Healthy 0.1-1. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il17a_b,blood_cytokines,numeric,Interleukin-17A,pg/mL,0,5,proposed_new,Th17 cytokine. Healthy 0.5-3. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il23_b,blood_cytokines,numeric,Interleukin-23,pg/mL,0,10,proposed_new,Th17 axis upstream. Healthy 0.5-5. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il18_b,blood_cytokines,numeric,Interleukin-18,pg/mL,0,500,proposed_new,IFN-γ inducer. Healthy 100-300. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+ifna2_b,blood_cytokines,numeric,Interferon alpha 2,pg/mL,0,14,proposed_new,Anti-viral / type I interferon. Healthy 1-10. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.
+il33_b,blood_cytokines,numeric,Interleukin-33,pg/mL,0,15,proposed_new,Alarmin; tissue damage signal. Healthy 1-10. The _b suffix is a project naming convention (not aligned with visit_id _start). Values are fully synthesised from healthy-elderly serum ranges; not in any master file.

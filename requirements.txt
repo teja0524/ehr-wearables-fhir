@@ -1,0 +1,21 @@
+# Core LLM / Agent framework
+anthropic>=0.28.0
+langgraph>=0.2.0
+langchain-anthropic>=0.2.0
+langchain-core>=0.3.0
+
+# Vector store + embeddings
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+
+# Data handling
+pandas>=2.0.0
+numpy>=1.26.0
+
+# FHIR
+fhir.resources>=7.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+rich>=13.0.0          # pretty console output
+pydantic>=2.0.0
