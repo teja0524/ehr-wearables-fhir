@@ -1,23 +1,5 @@
 """
-EHR / Wearables → FHIR R4 Transformation
-=============================================
-Multi-agent pipeline using LangGraph + Claude API + ChromaDB.
-
-Quick start
------------
-1. Create a .env file:
-       ANTHROPIC_API_KEY=sk-ant-...
-
-2. Install dependencies:
-       pip install -r requirements.txt
-
-3. Run the MVP on blood + wearables (first 3 subjects, fast demo):
-       python main.py
-
-4. Run on all subjects, all clusters:
-       python main.py --clusters blood_labs blood_cytokines wearables --max-subjects 0
-
-5. View outputs in ./output/
+implementation of a multi-agent pipeline to transform EHR and wearables data
 """
 
 from __future__ import annotations

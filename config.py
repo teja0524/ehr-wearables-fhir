@@ -1,6 +1,5 @@
 """
-Configuration for the EHR/Wearables to FHIR Transformation
-Copy .env.example to .env and set ANTHROPIC_API_KEY before running.
+Configuration for the transformation pipeline, including paths, API keys, model names, and cluster registry.
 """
 import os
 from pathlib import Path
