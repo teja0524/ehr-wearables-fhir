@@ -2,7 +2,7 @@
 Node 1 — SchemaParser
 
 Reads each cluster's dictionary CSV and extracts VariableMeta records
-for all measurable variables. Uses deterministic CSV parsing — no LLM.
+for all measurable variables. Uses deterministic CSV parsing. No LLM.
 """
 
 from __future__ import annotations

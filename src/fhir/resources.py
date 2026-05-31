@@ -1,6 +1,6 @@
 """
 FHIR R4 resource factory using the `fhir.resources` Pydantic library.
-Resources are validated at construction time — field errors surface immediately.
+Resources are validated at construction time. So, field errors surface immediately.
 
 Spec: https://hl7.org/fhir/R4/
 """
@@ -61,7 +61,7 @@ PROFILE_VITALSIGNS   = "http://hl7.org/fhir/StructureDefinition/vitalsigns"
 PROFILE_DIAG_REPORT  = "http://hl7.org/fhir/StructureDefinition/DiagnosticReport"
 
 # HL7 Europe base profiles (v2.0.0, Apr 2026) — for EHDS-compliant deployments
-# Switch meta.profile to these when targeting European health data exchange.
+# Can switch meta.profile to these when targeting European health data exchange.
 # Ref: https://hl7.eu/fhir/base
 PROFILE_EU_PATIENT      = "https://hl7.eu/fhir/base/StructureDefinition/patient-eu-core"
 PROFILE_EU_OBSERVATION  = "https://hl7.eu/fhir/base/StructureDefinition/observation-eu-core"

@@ -3,7 +3,7 @@ Node 3 — FHIRBuilder
 
 Reads each cluster's data CSV, applies code_mappings from the CodeMapper
 agent, and produces validated FHIR R4 resources using the fhir.resources
-Pydantic library. Resources are validated at construction time — any
+Pydantic library. Resources are validated at construction time, any
 structural violation raises immediately rather than being caught later.
 
 Strategy used:
@@ -44,8 +44,8 @@ def build_fhir(state: PipelineState, cfg: Any) -> PipelineState:
     LangGraph node: build validated FHIR R4 resources for all subjects.
 
     Resources are fhir.resources Pydantic models during construction
-    (full validation), then serialised to plain dicts via to_dict()
-    for storage in state (JSON-serialisable).
+    then serialised to plain dicts via to_dict() for storage in state 
+    (JSON-serialisable).
 
     Outputs:
         state["fhir_bundles"]   — {subject_id: Bundle dict (JSON-ready)}
@@ -152,7 +152,7 @@ def _process_wide_lab(
             row_dict   = row.to_dict()
             visit_date = str(row_dict.get(date_col, ""))
 
-            # Returns list[Observation] — each already Pydantic-validated
+            # Returns list[Observation] - Pydantic validated
             observations = observations_from_wide_row(
                 row=row_dict,
                 subject_id=subject_id,

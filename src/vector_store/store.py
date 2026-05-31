@@ -176,33 +176,27 @@ def load_umls_mrconso(
     target_sabs: list[str] | None = None,
 ) -> None:
     """
-    Loads the full UMLS MRCONSO.RRF into the ChromaDB store.
+    Loads the full UMLS into the ChromaDB store.
 
     This replaces the seed CSV approach with the complete UMLS Metathesaurus,
-    which consolidates LOINC, SNOMED CT, ICD-10-CM, RxNorm, and 150+ other
-    vocabulary sources.
+    which consolidates LOINC, SNOMED CT and 150+ other vocabulary sources.
 
     Parameters
     ----------
     mrconso_path : Path
-        Path to MRCONSO.RRF (download from https://www.nlm.nih.gov/research/umls/)
+        Path to MRCONSO.RRF (from https://www.nlm.nih.gov/research/umls/)
     store : TerminologyStore
-        Initialised (but not yet seeded) store instance
+        Initialise (but not yet seeded) store instance
     target_sabs : list[str], optional
         Vocabulary source abbreviations to import.
         Defaults to ["LNC", "SNOMEDCT_US", "ICD10CM", "RXNORM"].
 
-    Notes
-    -----
-    MRCONSO.RRF has ~15M rows. Batch the .add() calls in chunks of ~1000 to
-    avoid memory issues. This function is a stub — implement it when you have
-    a UMLS license and access to the release files.
+    Notes: MRCONSO.RRF has ~15M rows. Batching the .add() calls in chunks of ~1000 can 
+    help avoid memory issues.
     """
     if target_sabs is None:
         target_sabs = ["LNC", "SNOMEDCT_US", "ICD10CM", "RXNORM"]
 
     raise NotImplementedError(
         "Full UMLS loader not yet implemented. "
-        "Obtain UMLS release from https://www.nlm.nih.gov/research/umls/ "
-        "then implement the MRCONSO.RRF parsing here."
     )
