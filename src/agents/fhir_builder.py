@@ -148,11 +148,14 @@ def _process_wide_lab(
         subject_models.setdefault(subject_id, [])
         all_obs: list[Observation] = []
 
+        # Compute report_id before building observations so we can set partOf
+        report_id     = f"dr-{subject_id}-{cluster_name}".replace("_", "-")
+        report_ref    = f"{cfg.FHIR_BASE_URL}/DiagnosticReport/{report_id}"
+
         for _, row in subject_rows.iterrows():
             row_dict   = row.to_dict()
             visit_date = str(row_dict.get(date_col, ""))
 
-            # Returns list[Observation] - Pydantic validated
             observations = observations_from_wide_row(
                 row=row_dict,
                 subject_id=subject_id,
@@ -160,6 +163,7 @@ def _process_wide_lab(
                 mapping_index=mapping_index,
                 cluster=cluster_name,
                 category_code=category_code,
+                part_of_ref=report_ref,
                 base_url=cfg.FHIR_BASE_URL,
             )
             all_obs.extend(observations)
@@ -169,15 +173,12 @@ def _process_wide_lab(
         if all_obs:
             first_row      = subject_rows.iloc[0].to_dict()
             effective_date = str(first_row.get(date_col, ""))
-            report_id      = f"dr-{subject_id}-{cluster_name}".replace("_", "-")
 
-            # Build full absolute reference URLs for the DiagnosticReport.result
             obs_refs = [
                 f"{cfg.FHIR_BASE_URL}/Observation/{obs.id}"
                 for obs in all_obs
             ]
 
-            # Returns DiagnosticReport — Pydantic-validated
             report = build_diagnostic_report(
                 subject_id=subject_id,
                 report_id=report_id,

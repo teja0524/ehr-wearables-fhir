@@ -121,13 +121,15 @@ def build_observation(
     status: str = "final",
     category_code: str = "laboratory",
     device_id: str | None = None,
+    part_of_ref: str | None = None,
     base_url: str,
     obs_id: str | None = None,
 ) -> Observation:
     """
     Build a validated FHIR R4 Observation.
     If value is None, dataAbsentReason is set instead of valueQuantity.
-    device_id, if provided, populates Observation.device for wearables.
+    device_id populates Observation.device for wearable data.
+    part_of_ref populates Observation.partOf for reverse linking to a DiagnosticReport.
     """
     resource_id = obs_id or make_resource_id("obs-")
     cat_display = _CATEGORY_DISPLAY.get(category_code, category_code.title())
@@ -169,6 +171,9 @@ def build_observation(
                 value=device_id,
             )
         )
+
+    if part_of_ref:
+        obs_data["partOf"] = [Reference(reference=part_of_ref)]
 
     return Observation(**obs_data)
 
@@ -246,11 +251,13 @@ def observations_from_wide_row(
     mapping_index: dict,
     cluster: str,
     category_code: str = "laboratory",
+    part_of_ref: str | None = None,
     base_url: str,
 ) -> list[Observation]:
     """
     One wide CSV row (e.g. a blood_labs row) → list of Observation models.
     One Observation is produced per mapped, non-null column.
+    part_of_ref, if provided, sets Observation.partOf for reverse linking to a DiagnosticReport.
     """
     skip_cols = {"subject_id", "visit_id", "visit_date"}
     observations: list[Observation] = []
@@ -273,7 +280,6 @@ def observations_from_wide_row(
         except (TypeError, ValueError):
             pass
 
-        # FHIR id pattern: [A-Za-z0-9\-.] only — replace underscores and colons
         obs_id = f"obs-{subject_id}-{col}-{visit_date}".replace("_", "-").replace(".", "-").replace(":", "-")
 
         ucum = mapping.get("ucum_unit", "")
@@ -287,6 +293,7 @@ def observations_from_wide_row(
             unit_code=ucum or None,
             effective_datetime=f"{visit_date}T00:00:00Z",
             category_code=category_code,
+            part_of_ref=part_of_ref,
             base_url=base_url,
             obs_id=obs_id,
         )
@@ -337,8 +344,10 @@ def observations_from_timeseries_rows(
         source    = str(row.get(source_col, ""))
 
         category_code, _ = _wearable_category(kind, source)
-        # FHIR id pattern: [A-Za-z0-9\-.] only — underscores not allowed
-        obs_id = f"obs-{subject_id}-{kind}-{i}".replace("_", "-").replace(".", "-").replace(":", "-")
+        # ID: subject + kind + date + counter
+        # Date extracted from timestamp; counter handles multiple readings per day.
+        date_part = timestamp[:10] if timestamp else "nodate"
+        obs_id = f"obs-{subject_id}-{kind}-{date_part}-{i}".replace("_", "-")
 
         obs = build_observation(
             subject_id=subject_id,
