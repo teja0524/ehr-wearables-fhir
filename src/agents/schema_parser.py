@@ -22,8 +22,9 @@ MAPPABLE_TYPES = {"numeric", "integer", "yesno", "categorical"}
 
 # Columns that are structural keys, never clinical measurements
 STRUCTURAL_VARS = {
-    "subject_id", "visit_id", "visit_date", "timestamp_utc",
+    "subject_id", "visit_id", "visit_date", "visit_type", "timestamp_utc",
     "device_id", "source", "quantity_kind", "value", "unit",
+    "dx_index", "med_index", "taxon_id", "taxon_name", "group", "enrollment_date",
 }
 
 
@@ -33,6 +34,7 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
     Timeseries clusters are expanded by unique quantity_kind from the data file.
     """
     registry = cfg.CLUSTER_REGISTRY
+    rag_mappings = getattr(cfg, "RAG_MAPPINGS", {"rag_loinc"})
     all_meta: list[VariableMeta] = []
 
     for cluster_name in state["clusters"]:
@@ -41,6 +43,14 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
             continue
 
         cluster_cfg = registry[cluster_name]
+
+        # Only clusters that rely on LLM/RAG code mapping are parsed here.
+        # Clusters with codes already in the data, RxNorm lookups, or local
+        # study-specific codes are handled deterministically by their builders.
+        if cluster_cfg.get("mapping", "rag_loinc") not in rag_mappings:
+            logger.info("Skipping schema parse for '%s' (deterministic mapping)", cluster_name)
+            continue
+
         dict_path = cfg.SAMPLE_DIR / cluster_cfg["dict_file"]
         strategy = cluster_cfg.get("strategy", "wide_lab")
 
@@ -53,8 +63,12 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
         try:
             if strategy == "timeseries":
                 meta_list = _parse_timeseries_cluster(cluster_name, cluster_cfg, dict_path, cfg)
+            elif strategy == "medication_request":
+                meta_list = _parse_medication_cluster(cluster_name, cluster_cfg, cfg)
             else:
-                meta_list = _parse_wide_cluster(cluster_name, dict_path)
+                meta_list = _parse_wide_cluster(
+                    cluster_name, dict_path, cluster_cfg.get("dict_form")
+                )
 
             logger.info("  → %d mappable variables found", len(meta_list))
             all_meta.extend(meta_list)
@@ -69,18 +83,22 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
     return state
 
 
-def _parse_wide_cluster(cluster_name: str, dict_path: Path) -> list[VariableMeta]:
+def _parse_wide_cluster(
+    cluster_name: str, dict_path: Path, dict_form: str | None = None
+) -> list[VariableMeta]:
     """Parse a wide-format cluster dictionary. Returns one VariableMeta per measurable column."""
     df = pd.read_csv(dict_path)
-    # Dictionary may contain rows for multiple forms (blood_labs + blood_cytokines)
-    # Filter to rows that belong to this cluster's form
+    # Dictionary may contain rows for multiple forms (e.g. clinical_dictionary
+    # holds vitals + lifestyle + diagnoses + medications). Filter to this
+    # cluster's form: explicit 'dict_form' wins, else fall back to a name match.
     if "form" in df.columns:
-        # Try to match on cluster_name (strip trailing _b suffixes etc.)
-        forms_in_dict = df["form"].unique()
-        # Find the best-matching form
-        matching_forms = [f for f in forms_in_dict if cluster_name in f or f in cluster_name]
-        if matching_forms:
-            df = df[df["form"].isin(matching_forms)]
+        if dict_form:
+            df = df[df["form"] == dict_form]
+        else:
+            forms_in_dict = df["form"].unique()
+            matching_forms = [f for f in forms_in_dict if cluster_name in f or f in cluster_name]
+            if matching_forms:
+                df = df[df["form"].isin(matching_forms)]
 
     meta_list: list[VariableMeta] = []
     for _, row in df.iterrows():
@@ -102,6 +120,31 @@ def _parse_wide_cluster(cluster_name: str, dict_path: Path) -> list[VariableMeta
             cluster=cluster_name,
         ))
 
+    return meta_list
+
+
+def _parse_medication_cluster(
+    cluster_name: str, cluster_cfg: dict, cfg: Any
+) -> list[VariableMeta]:
+    """
+    Expand a medications table into one VariableMeta per distinct drug name.
+    Each drug is mapped to an RxNorm ingredient by the CodeMapper.
+    """
+    data_path = cfg.SAMPLE_DIR / cluster_cfg["data_file"]
+    if not data_path.exists():
+        return []
+    df = pd.read_csv(data_path)
+    drug_col = cluster_cfg.get("drug_col", "drug_name")
+    if drug_col not in df.columns:
+        return []
+    meta_list: list[VariableMeta] = []
+    for drug in sorted({str(d).strip() for d in df[drug_col].dropna() if str(d).strip()}):
+        meta_list.append(VariableMeta(
+            variable=drug, label=drug, units="", var_type="medication",
+            min_val="", max_val="",
+            notes="Medication ingredient; map to the RxNorm ingredient (IN) code.",
+            cluster=cluster_name,
+        ))
     return meta_list
 
 

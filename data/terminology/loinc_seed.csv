@@ -63,3 +63,13 @@ loinc_code,long_common_name,component,property,time_aspect,system,scale,method,u
 55440-2,Daily activity index,Activity index,Anat,24H,^Patient,Qn,,{index},activity,daily activity index score 0-1 dimensionless wearable polar
 82290-8,Distance walked in unspecified time Estimated,Distance,Len,Pt,^Patient,Qn,,m,activity,distance walked traveled meters metres daily activity wearable
 89576-3,Cardiorespiratory fitness estimated,VO2max,VRat/Mass,Pt,^Patient,Qn,,mL/min/kg,activity,cardio load fitness VO2max aerobic capacity wearable polar
+8302-2,Body height,Body height,Len,Pt,^Patient,Qn,,cm,vital-signs,body height stature length cm vital sign anthropometry
+29463-7,Body weight,Body weight,Mass,Pt,^Patient,Qn,,kg,vital-signs,body weight mass kg vital sign anthropometry
+39156-5,Body mass index (BMI) [Ratio],Body mass index,Ratio,Pt,^Patient,Qn,,kg/m2,vital-signs,BMI body mass index Quetelet kg/m2 vital sign anthropometry
+8280-0,Waist Circumference at umbilicus by Tape measure,Waist circumference,Circ,Pt,Abdomen,Qn,Tape measure,cm,vital-signs,waist circumference abdominal girth cm tape measure anthropometry
+8480-6,Systolic blood pressure,Systolic blood pressure,Pres,Pt,Arterial system,Qn,,mm[Hg],vital-signs,systolic blood pressure BP SBP mmHg vital sign
+8462-4,Diastolic blood pressure,Diastolic blood pressure,Pres,Pt,Arterial system,Qn,,mm[Hg],vital-signs,diastolic blood pressure BP DBP mmHg vital sign
+72166-2,Tobacco smoking status,Tobacco smoking status,Type,Pt,^Patient,Nom,,,social-history,tobacco smoking status cigarette smoker never former current social history
+74013-4,Alcoholic drinks per week,Alcoholic drinks,Num,1W,^Patient,Qn,,{drinks}/wk,social-history,alcohol drinks per week consumption units ethanol social history
+72106-8,Total score [MMSE],MMSE,Score,Pt,^Patient,Qn,,{score},survey,MMSE mini mental state examination cognitive screening total score dementia cognition survey
+48544-1,Geriatric depression scale (GDS) total,GDS,Score,Pt,^Patient,Qn,,{score},survey,GDS geriatric depression scale GDS-30 total score mood depression survey

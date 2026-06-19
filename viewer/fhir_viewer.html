@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COMFORTage FHIR Bundle Viewer</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#fff; --ink:#1f2733; --muted:#65748b; --line:#e3e8ef;
+    --accent:#1565c0; --accent-soft:#e7f0fb; --std:#1e7d52; --std-soft:#e4f4ec;
+    --local:#9a6b00; --local-soft:#fbf0d6; --chip:#eef1f5; --danger:#b3261e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 22px;
+         display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:5}
+  header h1{font-size:17px;margin:0;font-weight:650}
+  header .sub{color:var(--muted);font-size:12.5px}
+  header .spacer{flex:1}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 14px;
+       font-size:14px;cursor:pointer;font-weight:600}
+  .btn.ghost{background:var(--accent-soft);color:var(--accent)}
+  .wrap{display:flex;gap:18px;max-width:1180px;margin:18px auto;padding:0 18px;align-items:flex-start}
+  .side{width:210px;flex:none;position:sticky;top:74px}
+  .side h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px 4px}
+  .side button{display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--line);
+       border-radius:8px;padding:9px 11px;margin-bottom:6px;cursor:pointer;font-size:14px;color:var(--ink)}
+  .side button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600}
+  main{flex:1;min-width:0}
+  .drop{border:2px dashed #c4cdda;border-radius:12px;padding:40px;text-align:center;color:var(--muted);background:#fff}
+  .drop.drag{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .pt{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .pt .name{font-size:22px;font-weight:700}
+  .pt .meta{color:var(--muted);margin-top:4px;font-size:14px}
+  .pills{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px}
+  .pill{background:var(--chip);border-radius:999px;padding:4px 11px;font-size:12.5px;color:#33424f}
+  .pill.warn{background:var(--local-soft);color:var(--local)}
+  .interop{display:flex;gap:10px;margin:0 0 16px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 14px;flex:1;text-align:center}
+  .stat b{display:block;font-size:21px}
+  .stat span{font-size:11.5px;color:var(--muted)}
+  .bar{height:8px;border-radius:6px;background:var(--local-soft);overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;background:var(--std)}
+  section.card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden}
+  section.card>h2{font-size:14.5px;margin:0;padding:13px 18px;border-bottom:1px solid var(--line);
+       display:flex;align-items:center;gap:9px}
+  section.card>h2 .ct{margin-left:auto;color:var(--muted);font-weight:500;font-size:12.5px}
+  table{width:100%;border-collapse:collapse}
+  td,th{padding:9px 18px;text-align:left;border-bottom:1px solid #f0f3f7;vertical-align:top}
+  th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  tr:last-child td{border-bottom:0}
+  .val{font-weight:600;white-space:nowrap}
+  .desc{color:var(--ink)}
+  .sub2{color:var(--muted);font-size:12.5px}
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .badge{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+  .badge.std{background:var(--std-soft);color:var(--std)}
+  .badge.local{background:var(--local-soft);color:var(--local)}
+  .badge.other{background:#eceff3;color:#55606e}
+  .empty{color:var(--muted);padding:30px;text-align:center}
+  footer{max-width:1180px;margin:8px auto 40px;padding:0 18px;color:var(--muted);font-size:12px}
+  @media(max-width:760px){.wrap{flex-direction:column}.side{width:100%;position:static}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>COMFORTage · FHIR Bundle Viewer</h1>
+  <div class="sub">Clinical view of transformed EHR / wearables data with terminology coding</div></div>
+  <div class="spacer"></div>
+  <button class="btn" id="pickBtn">Open bundle file(s)…</button>
+  <input type="file" id="file" accept=".json,application/json" multiple hidden>
+</header>
+
+<div class="wrap">
+  <aside class="side" id="side" hidden><h3>Patients</h3><div id="ptlist"></div></aside>
+  <main id="main">
+    <div class="drop" id="drop">
+      <p style="font-size:16px;margin:0 0 6px"><b>Drop a FHIR bundle JSON here</b></p>
+      <p style="margin:0">or use “Open bundle file(s)…” — load any <code>*_fhir_bundle.json</code> from the pipeline’s <code>output/</code> folder.<br>
+      Multiple files are fine; pick patients from the sidebar.</p>
+    </div>
+  </main>
+</div>
+<footer>Renders FHIR R4B Bundles. Codes shown with their system; <span class="badge std">STANDARD</span> = LOINC/SNOMED/RxNorm/NCBI, <span class="badge local">LOCAL</span> = study-specific fallback code (no standard mapping yet).</footer>
+
+<script>
+const LOCAL_SYS="http://comfortage.example.org/fhir/CodeSystem/comfortage-local";
+const SYS={
+ "http://loinc.org":["LOINC","std"],
+ "http://snomed.info/sct":["SNOMED CT","std"],
+ "http://www.nlm.nih.gov/research/umls/rxnorm":["RxNorm","std"],
+ "http://www.ncbi.nlm.nih.gov/taxonomy":["NCBI Taxonomy","std"],
+ [LOCAL_SYS]:["Local","local"],
+};
+const patients={}; let current=null;
+
+function sysInfo(uri){ if(!uri) return ["—","other"]; if(SYS[uri]) return SYS[uri];
+  return [uri.replace(/^https?:\/\//,"").split("/")[0],"other"]; }
+function firstCoding(cc){ return cc && cc.coding && cc.coding[0] ? cc.coding[0] : null; }
+function badge(coding){ if(!coding) return '<span class="badge other">no code</span>';
+  const [lab,cls]=sysInfo(coding.system);
+  return `<span class="badge ${cls}">${cls==='std'?lab:'LOCAL'}</span> <span class="code">${coding.code||''}</span>`;}
+function age(dob){ if(!dob) return null; const d=new Date(dob); if(isNaN(d)) return null;
+  const t=new Date(); let a=t.getFullYear()-d.getFullYear();
+  if(t.getMonth()<d.getMonth()||(t.getMonth()==d.getMonth()&&t.getDate()<d.getDate()))a--; return a;}
+function obsValue(o){
+  if(o.valueQuantity){const q=o.valueQuantity;const u=q.unit||q.code||"";return {num:q.value,txt:`${fmt(q.value)} ${u}`.trim(),unit:u};}
+  if(o.valueCodeableConcept){const c=firstCoding(o.valueCodeableConcept);return {txt:(o.valueCodeableConcept.text||(c&&c.display)||"—"),coding:c};}
+  if(o.valueString!=null) return {txt:o.valueString};
+  if(o.valueInteger!=null) return {num:o.valueInteger,txt:String(o.valueInteger)};
+  if(o.dataAbsentReason) return {txt:"(not recorded)",absent:true};
+  return {txt:"—"};
+}
+function fmt(n){ if(typeof n!=="number") return n; return Math.round(n*100)/100; }
+function dt(s){ return s? String(s).slice(0,10):""; }
+
+function sectionFor(o){
+  const cat=(o.category&&o.category[0]&&o.category[0].coding&&o.category[0].coding[0].code)||"other";
+  const cd=firstCoding(o.code)||{}; const sys=cd.system||""; const disp=(cd.display||"").toLowerCase(); const code=(cd.code||"").toLowerCase();
+  if(sys==="http://www.ncbi.nlm.nih.gov/taxonomy"||code==="chao1"||code==="shannon"||disp.includes("relative abundance")) return "Microbiome";
+  if(cat==="procedure") return "EEG / neurophysiology";
+  if(cat==="vital-signs") return "Vital signs";
+  if(cat==="laboratory") return "Laboratory & biomarkers";
+  if(cat==="activity") return "Activity & wearables";
+  if(cat==="survey") return "Assessments & questionnaires";
+  if(cat==="social-history") return "Social history";
+  if(cat==="exam") return disp.includes("sleep")?"Activity & wearables":"Dental";
+  return "Other observations";
+}
+const SECTION_ORDER=["Vital signs","Laboratory & biomarkers","Microbiome","Assessments & questionnaires",
+  "Dental","Activity & wearables","EEG / neurophysiology","Social history","Other observations"];
+
+function ingest(bundle,fname){
+  if(!bundle||bundle.resourceType!=="Bundle"||!bundle.entry){throw new Error("Not a FHIR Bundle");}
+  const res=bundle.entry.map(e=>e.resource).filter(Boolean);
+  const pt=res.find(r=>r.resourceType==="Patient");
+  const id=(pt&&pt.id)||fname||("bundle-"+Object.keys(patients).length);
+  patients[id]={id,patient:pt,res,fname};
+  return id;
+}
+
+function render(id){
+  current=id; const P=patients[id]; const res=P.res; const main=document.getElementById("main");
+  const byType=t=>res.filter(r=>r.resourceType===t);
+  const conditions=byType("Condition"), meds=byType("MedicationRequest"),
+        allergies=byType("AllergyIntolerance"), encs=byType("Encounter"), obs=byType("Observation");
+
+  // interop coverage across coded clinical resources
+  let std=0,loc=0;
+  const tally=cc=>{const c=firstCoding(cc);if(!c)return;(c.system===LOCAL_SYS?loc++:std++);};
+  obs.forEach(o=>tally(o.code)); conditions.forEach(c=>tally(c.code)); meds.forEach(m=>tally(m.medicationCodeableConcept));
+  const tot=std+loc, pct=tot?Math.round(std/tot*100):0;
+
+  // patient header bits
+  const pt=P.patient||{}; const a=age(pt.birthDate);
+  const cohort=obs.find(o=>{const c=firstCoding(o.code);return c&&c.code==="study_group";});
+  const grp=cohort?obsValue(cohort).txt:null;
+
+  let h=`<div class="pt">
+    <div class="name">${pt.id||id}</div>
+    <div class="meta">${[pt.gender?cap(pt.gender):null, pt.birthDate?`born ${pt.birthDate}${a!=null?` · ${a} yrs`:""}`:null].filter(Boolean).join(" · ")||"Pseudonymised study subject"}</div>
+    <div class="pills">
+      ${grp?`<span class="pill">Cohort: ${grp}</span>`:""}
+      <span class="pill">${conditions.length} problems</span>
+      <span class="pill">${meds.length} medications</span>
+      <span class="pill${allergies.length?" warn":""}">${allergies.length} allergies</span>
+      <span class="pill">${obs.length} observations</span>
+      <span class="pill">${encs.length} visits</span>
+    </div></div>`;
+
+  h+=`<div class="interop">
+    <div class="stat"><b>${res.length}</b><span>FHIR resources</span></div>
+    <div class="stat"><b>${std}/${tot}</b><span>coded to a standard</span>
+      <div class="bar"><i style="width:${pct}%"></i></div></div>
+    <div class="stat"><b>${loc}</b><span>local fallback codes</span></div>
+  </div>`;
+
+  // Problems
+  h+=card("Problems & diagnoses",conditions.length, conditions.length?table(
+    ["Condition","Onset","Code"],
+    conditions.map(c=>{const cd=firstCoding(c.code)||{};return [
+      `<span class="desc">${(c.code&&c.code.text)||cd.display||"—"}</span>`, dt(c.onsetDateTime), badge(cd)];}))
+    :empty("No diagnoses in this bundle."));
+
+  // Medications
+  h+=card("Medications",meds.length, meds.length?table(
+    ["Medication","Dosage","Code"],
+    meds.map(m=>{const cd=firstCoding(m.medicationCodeableConcept)||{};
+      const dose=(m.dosageInstruction&&m.dosageInstruction[0]&&m.dosageInstruction[0].text)||"";
+      return [`<span class="desc">${(m.medicationCodeableConcept&&m.medicationCodeableConcept.text)||cd.display||"—"}</span>`,
+        `<span class="sub2">${dose}</span>`, badge(cd)];}))
+    :empty("No medications in this bundle."));
+
+  // Allergies
+  if(allergies.length) h+=card("Allergies",allergies.length, table(["Substance","Status",""],
+    allergies.map(al=>[`<span class="desc">${(al.code&&al.code.text)||"—"}</span>`,
+      `<span class="sub2">${(al.clinicalStatus&&al.clinicalStatus.text)||""}</span>`,""])));
+
+  // Observation sections (aggregated by code+display)
+  const groups={};
+  obs.forEach(o=>{ if(firstCoding(o.code)&&firstCoding(o.code).code==="study_group")return;
+    const sec=sectionFor(o); (groups[sec]=groups[sec]||[]).push(o); });
+  SECTION_ORDER.forEach(sec=>{ if(!groups[sec])return; h+=obsSection(sec,groups[sec]); });
+  Object.keys(groups).forEach(sec=>{ if(!SECTION_ORDER.includes(sec)) h+=obsSection(sec,groups[sec]); });
+
+  // Visits timeline
+  if(encs.length){ const rows=encs.map(e=>{const p=e.period||{};
+      return [dt(p.start), `<span class="desc">${(e.type&&e.type[0]&&e.type[0].text)||"Encounter"}</span>`,
+        `<span class="sub2">${(e.class&&e.class.display)||""}</span>`];})
+      .sort((a,b)=>a[0]<b[0]?-1:1);
+    h+=card("Visits / encounters",encs.length, table(["Date","Type","Class"],rows)); }
+
+  main.innerHTML=h;
+  // sidebar
+  const ids=Object.keys(patients);
+  const side=document.getElementById("side");
+  side.hidden=ids.length<1;
+  document.getElementById("ptlist").innerHTML=ids.map(x=>
+    `<button class="${x===id?'active':''}" onclick="render('${x}')">${(patients[x].patient&&patients[x].patient.id)||x}</button>`).join("");
+}
+
+function obsSection(title,list){
+  // aggregate by code|display
+  const agg={};
+  list.forEach(o=>{ const cd=firstCoding(o.code)||{}; const key=(cd.system||"")+"|"+(cd.code||"")+"|"+((cd.display)||"");
+    const v=obsValue(o); const g=agg[key]||(agg[key]={cd,disp:(o.code&&o.code.text)||cd.display||cd.code||"—",
+      nums:[],txts:[],dates:[],n:0}); g.n++;
+    if(typeof v.num==="number")g.nums.push(v.num); else if(v.txt)g.txts.push(v.txt);
+    if(o.effectiveDateTime)g.dates.push(dt(o.effectiveDateTime)); g.unit=v.unit||g.unit; });
+  const rows=Object.values(agg).sort((a,b)=>a.disp.localeCompare(b.disp)).map(g=>{
+    let val;
+    if(g.nums.length){ const mn=Math.min(...g.nums),mx=Math.max(...g.nums);
+      const mean=g.nums.reduce((s,x)=>s+x,0)/g.nums.length;
+      val=g.nums.length===1?`${fmt(g.nums[0])} ${g.unit||""}`
+         :`${fmt(mean)} ${g.unit||""} <span class="sub2">(${fmt(mn)}–${fmt(mx)}, n=${g.n})</span>`;
+    } else { const u=[...new Set(g.txts)]; val=u.slice(0,3).join(", ")+(u.length>3?"…":"")+(g.n>1?` <span class="sub2">(n=${g.n})</span>`:""); }
+    const dr=g.dates.length?[...new Set(g.dates)].sort():[];
+    const drTxt=dr.length?(dr[0]===dr[dr.length-1]?dr[0]:`${dr[0]} → ${dr[dr.length-1]}`):"";
+    return [`<span class="desc">${g.disp}</span>`, `<span class="val">${val}</span>`,
+      `<span class="sub2">${drTxt}</span>`, badge(g.cd)];
+  });
+  return card(title,rows.length, table(["Measure","Value","Date","Code"],rows));
+}
+
+function card(title,count,inner){
+  return `<section class="card"><h2>${title}<span class="ct">${count} ${count===1?"item":"items"}</span></h2>${inner}</section>`;}
+function table(head,rows){ if(!rows.length) return empty("None recorded.");
+  return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${
+    rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;}
+function empty(m){return `<div class="empty">${m}</div>`;}
+function cap(s){return s?s[0].toUpperCase()+s.slice(1):s;}
+
+// ---- file loading ----
+function handleFiles(files){
+  let last=null,errs=[];
+  [...files].forEach(f=>{ const r=new FileReader();
+    r.onload=()=>{ try{ last=ingest(JSON.parse(r.result),f.name.replace(/\.json$/i,"")); render(last);}
+      catch(e){ alert(`${f.name}: ${e.message}`);} };
+    r.readAsText(f); });
+}
+document.getElementById("pickBtn").onclick=()=>document.getElementById("file").click();
+document.getElementById("file").onchange=e=>handleFiles(e.target.files);
+const drop=document.getElementById("drop");
+["dragover","dragenter"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+document.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files.length)handleFiles(e.dataTransfer.files);});
+</script>
+</body>
+</html>

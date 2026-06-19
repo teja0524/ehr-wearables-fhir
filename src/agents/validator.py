@@ -23,16 +23,28 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "DiagnosticReport": ["status", "code", "subject"],
     "Patient": ["id"],
     "Bundle": ["type", "entry"],
+    "Encounter": ["status", "class", "subject"],
+    "Condition": ["code", "subject"],
+    "MedicationRequest": ["status", "intent", "subject"],
+    "AllergyIntolerance": ["patient"],
 }
 
 VALID_CODE_SYSTEMS = {
     "http://loinc.org",
-    "http://snomed.info",
+    "http://snomed.info/sct",
+    "http://www.nlm.nih.gov/research/umls/rxnorm",
+    "http://www.ncbi.nlm.nih.gov/taxonomy",
     "http://hl7.org/fhir/sid/icd-10",
     "http://terminology.hl7.org/CodeSystem/observation-category",
     "http://terminology.hl7.org/CodeSystem/v2-0074",
+    "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+    "http://terminology.hl7.org/CodeSystem/condition-clinical",
+    "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+    "http://terminology.hl7.org/CodeSystem/condition-category",
+    "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
     "http://terminology.hl7.org/CodeSystem/data-absent-reason",
     "http://unitsofmeasure.org",
+    "http://comfortage.example.org/fhir/CodeSystem/comfortage-local",
 }
 
 VALID_OBS_STATUSES = {"registered", "preliminary", "final", "amended",
@@ -126,18 +138,24 @@ def _validate_observation(resource: dict, resource_id: str) -> list[ValidationIs
             message=f"Invalid Observation.status '{status}'",
         ))
 
-    # Must have either valueQuantity or dataAbsentReason
-    has_value = "valueQuantity" in resource
+    # Must carry a value[x] or an explicit dataAbsentReason. All FHIR R4
+    # Observation.value[x] choice types are acceptable, not just valueQuantity.
+    _VALUE_X = (
+        "valueQuantity", "valueCodeableConcept", "valueString", "valueBoolean",
+        "valueInteger", "valueRange", "valueRatio", "valueSampledData",
+        "valueTime", "valueDateTime", "valuePeriod",
+    )
+    has_value = any(k in resource for k in _VALUE_X)
     has_absent = "dataAbsentReason" in resource
     if not has_value and not has_absent:
         issues.append(ValidationIssue(
             resource_id=resource_id,
             severity="warning",
-            message="Observation has neither valueQuantity nor dataAbsentReason",
+            message="Observation has no value[x] and no dataAbsentReason",
         ))
 
     # valueQuantity should have value, unit, system
-    if has_value:
+    if "valueQuantity" in resource:
         vq = resource["valueQuantity"]
         for field in ["value", "unit"]:
             if field not in vq:

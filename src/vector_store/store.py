@@ -30,16 +30,20 @@ class TerminologyStore:
         chroma_dir: Path,
         loinc_csv: Path,
         snomed_csv: Path,
+        rxnorm_csv: Path | None = None,
         embedding_model: str = "all-MiniLM-L6-v2",
         loinc_collection: str = "loinc_terms",
         snomed_collection: str = "snomed_terms",
+        rxnorm_collection: str = "rxnorm_terms",
     ):
         self.chroma_dir = chroma_dir
         self.loinc_csv = loinc_csv
         self.snomed_csv = snomed_csv
+        self.rxnorm_csv = rxnorm_csv
         self.embedding_model = embedding_model
         self.loinc_collection_name = loinc_collection
         self.snomed_collection_name = snomed_collection
+        self.rxnorm_collection_name = rxnorm_collection
 
         self._ef = _sentence_transformer_ef(embedding_model)
         self._client = chromadb.PersistentClient(
@@ -48,6 +52,7 @@ class TerminologyStore:
         )
         self._loinc: chromadb.Collection | None = None
         self._snomed: chromadb.Collection | None = None
+        self._rxnorm: chromadb.Collection | None = None
 
     @classmethod
     def from_config(cls, cfg) -> "TerminologyStore":
@@ -56,15 +61,18 @@ class TerminologyStore:
             chroma_dir=cfg.CHROMA_DIR,
             loinc_csv=cfg.TERMINOLOGY_DIR / "loinc_seed.csv",
             snomed_csv=cfg.TERMINOLOGY_DIR / "snomed_seed.csv",
+            rxnorm_csv=getattr(cfg, "RXNORM_SEED", cfg.TERMINOLOGY_DIR / "rxnorm_seed.csv"),
             embedding_model=cfg.EMBEDDING_MODEL,
             loinc_collection=cfg.CHROMA_COLLECTION_LOINC,
             snomed_collection=cfg.CHROMA_COLLECTION_SNOMED,
+            rxnorm_collection=getattr(cfg, "CHROMA_COLLECTION_RXNORM", "rxnorm_terms"),
         )
 
     def build_or_load(self) -> None:
         """Build collections from CSV seeds if empty, otherwise just open them."""
         self._loinc = self._get_or_create(self.loinc_collection_name)
         self._snomed = self._get_or_create(self.snomed_collection_name)
+        self._rxnorm = self._get_or_create(self.rxnorm_collection_name)
 
         if self._loinc.count() == 0:
             logger.info("LOINC collection empty — seeding from %s", self.loinc_csv)
@@ -77,6 +85,13 @@ class TerminologyStore:
             self._seed_snomed()
         else:
             logger.info("SNOMED collection already has %d terms", self._snomed.count())
+
+        if self.rxnorm_csv and self.rxnorm_csv.exists():
+            if self._rxnorm.count() == 0:
+                logger.info("RxNorm collection empty — seeding from %s", self.rxnorm_csv)
+                self._seed_rxnorm()
+            else:
+                logger.info("RxNorm collection already has %d terms", self._rxnorm.count())
 
     def search_loinc(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """Semantic search over LOINC terms. Returns candidates with distance (lower = closer)."""
@@ -97,6 +112,18 @@ class TerminologyStore:
             include=["metadatas", "distances", "documents"],
         )
         return self._format_results(results, "snomed_code")
+
+    def search_rxnorm(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """Semantic search over RxNorm ingredients. Returns candidates with distance."""
+        assert self._rxnorm is not None, "Call build_or_load() first"
+        if self._rxnorm.count() == 0:
+            return []
+        results = self._rxnorm.query(
+            query_texts=[query],
+            n_results=min(top_k, self._rxnorm.count()),
+            include=["metadatas", "distances", "documents"],
+        )
+        return self._format_results(results, "rxnorm_code")
 
     def _get_or_create(self, name: str) -> chromadb.Collection:
         return self._client.get_or_create_collection(
@@ -151,6 +178,26 @@ class TerminologyStore:
                 })
         self._snomed.add(ids=ids, documents=docs, metadatas=metas)
         logger.info("Seeded %d SNOMED terms", len(ids))
+
+    def _seed_rxnorm(self) -> None:
+        ids, docs, metas = [], [], []
+        with open(self.rxnorm_csv, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                code = row["rxnorm_code"]
+                doc = (
+                    f"{row['ingredient_name']} | "
+                    f"brand: {row.get('brand_examples', '')} | "
+                    f"{row.get('search_text', '')}"
+                )
+                ids.append(code)
+                docs.append(doc)
+                metas.append({
+                    "rxnorm_code": code,
+                    "ingredient_name": row["ingredient_name"],
+                    "tty": row.get("tty", "IN"),
+                })
+        self._rxnorm.add(ids=ids, documents=docs, metadatas=metas)
+        logger.info("Seeded %d RxNorm terms", len(ids))
 
     @staticmethod
     def _format_results(

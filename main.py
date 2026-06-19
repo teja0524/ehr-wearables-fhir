@@ -79,6 +79,10 @@ def main() -> int:
                       "Create a .env file with ANTHROPIC_API_KEY=sk-ant-...")
         return 1
 
+    # "--clusters all" expands to every registered data cluster.
+    if len(args.clusters) == 1 and args.clusters[0].lower() == "all":
+        args.clusters = list(cfg.ALL_DATA_CLUSTERS)
+
     max_subjects = args.max_subjects if args.max_subjects > 0 else None
     console.print(
         f"[green]✓[/green] Config loaded | "
@@ -122,6 +126,18 @@ def main() -> int:
     console.print(f"\n[green]✓[/green] Pipeline completed in {elapsed:.1f}s")
 
     _print_summary(final_state, elapsed)
+
+    # Point the user at the clinical dashboard.
+    viewer = cfg.BASE_DIR / "viewer" / "fhir_viewer.html"
+    if viewer.exists():
+        console.print(Panel.fit(
+            f"[bold cyan]Clinical dashboard[/bold cyan]\n"
+            f"Open this file in your browser:\n"
+            f"[link=file://{viewer}]{viewer}[/link]\n"
+            f"[dim]then click “Open bundle file(s)…” and select the JSON files in[/dim]\n"
+            f"[dim]{cfg.OUTPUT_DIR}[/dim]",
+            border_style="cyan",
+        ))
 
     if final_state.get("errors"):
         for err in final_state["errors"]:
