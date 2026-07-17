@@ -8,6 +8,17 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
+# Columns that are structural keys / identifiers, never clinical measurements.
+# Shared by SchemaParser, FHIRBuilder and the Observation batch builders so the
+# "skip these columns" rule lives in exactly one place.
+STRUCTURAL_COLUMNS = {
+    "subject_id", "visit_id", "visit_date", "visit_type", "timestamp_utc",
+    "device_id", "source", "quantity_kind", "value", "unit",
+    "dx_index", "med_index", "snomed_id", "label_en", "taxon_id",
+    "taxon_name", "group", "enrollment_date",
+}
+
+
 class VariableMeta(TypedDict):
     """Metadata extracted by SchemaParser for a single variable."""
     variable: str
@@ -33,13 +44,6 @@ class CodeMapping(TypedDict):
     ucum_unit: str          # UCUM unit from the winning candidate's metadata
 
 
-class FHIRResource(TypedDict):
-    """A single serialisable FHIR R4 resource dict."""
-    resourceType: str
-    id: str
-    resource: dict[str, Any]
-
-
 class ValidationIssue(TypedDict):
     resource_id: str
     severity: str       # "error" | "warning" | "info"
@@ -48,13 +52,17 @@ class ValidationIssue(TypedDict):
 
 class PipelineState(TypedDict):
     """Full shared state flowing through all LangGraph nodes."""
+    dataset: dict[str, Any]                  # active dataset config (see config.DATASETS)
+    model: str                               # LLM model id used by the code mapper
+    skip_mapping: bool                       # reuse cached code mappings if available
+    apply_overrides: bool                    # re-apply saved technician overrides (sticky)
     clusters: list[str]
     subjects: list[str]
     max_subjects: int | None                # None = process all subjects
     variable_metadata: list[VariableMeta]
     code_mappings: list[CodeMapping]
     mapping_index: dict[str, CodeMapping]   # keyed as "cluster::variable"
-    fhir_resources: list[FHIRResource]
+    fhir_resources: list[dict[str, Any]]    # serialised FHIR resource dicts
     fhir_bundles: dict[str, dict]           # subject_id → Bundle JSON
     validation_issues: list[ValidationIssue]
     output_paths: list[str]                 # paths of written JSON files

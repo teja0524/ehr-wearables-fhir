@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from src.state import STRUCTURAL_COLUMNS
+
 # fhir.resources imports - R4B modules (FHIR 4.x), matching FHIR_VERSION 4.0.1.
 # The package's top-level modules are R5; R4B is the closest match to R4.
 # Each class maps 1-to-1 with a FHIR R4B resource or data type.
@@ -26,6 +28,7 @@ from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.observation import Observation, ObservationComponent
 from fhir.resources.R4B.patient import Patient
+from fhir.resources.R4B.procedure import Procedure
 from fhir.resources.R4B.quantity import Quantity
 from fhir.resources.R4B.reference import Reference
 
@@ -157,10 +160,24 @@ def build_encounter(
 
 
 def build_condition(
-    *, subject_id: str, condition_id: str, snomed_code: str, display: str,
+    *, subject_id: str, condition_id: str, snomed_code: str | None = None, display: str,
     onset_date: str | None = None, base_url: str,
+    code_system: str = SYS_SNOMED, text: str | None = None,
+    category: str = "encounter-diagnosis", category_display: str = "Encounter Diagnosis",
 ) -> Condition:
-    """FHIR R4 Condition coded in SNOMED CT (code supplied directly by the source data)."""
+    """
+    FHIR R4 Condition.
+
+    A coded Condition is produced when `snomed_code` (in `code_system`) is given.
+    When no code is available (e.g. ACE free-text diagnoses), a text-only
+    CodeableConcept is emitted using `text` (or `display`) so the diagnosis is
+    still represented. `category` distinguishes encounter diagnoses from
+    problem-list-item history (comorbidities).
+    """
+    if snomed_code and str(snomed_code).strip() not in ("", "nan"):
+        code_cc = _codeable_concept(code_system, str(snomed_code), display, text or display)
+    else:
+        code_cc = CodeableConcept(text=text or display)
     data: dict[str, Any] = {
         "id": condition_id,
         "meta": Meta(profile=[PROFILE_CONDITION]),
@@ -168,13 +185,30 @@ def build_condition(
         "verificationStatus": _codeable_concept(SYS_CONDITION_VER, "confirmed", "Confirmed"),
         "category": [_codeable_concept(
             "http://terminology.hl7.org/CodeSystem/condition-category",
-            "encounter-diagnosis", "Encounter Diagnosis")],
-        "code": _codeable_concept(SYS_SNOMED, str(snomed_code), display, display),
+            category, category_display)],
+        "code": code_cc,
         "subject": _subject_ref(subject_id, base_url),
     }
     if onset_date and str(onset_date).strip() not in ("", "nan"):
         data["onsetDateTime"] = f"{onset_date}T00:00:00Z"
     return Condition(**data)
+
+
+def build_procedure(
+    *, subject_id: str, procedure_id: str, code: str, display: str,
+    code_system: str, status: str = "completed",
+    performed_date: str | None = None, base_url: str,
+) -> "Procedure":
+    """FHIR R4 Procedure (e.g. ACE study intervention)."""
+    data: dict[str, Any] = {
+        "id": procedure_id,
+        "status": status,
+        "code": _codeable_concept(code_system, str(code), display, display),
+        "subject": _subject_ref(subject_id, base_url),
+    }
+    if performed_date and str(performed_date).strip() not in ("", "nan"):
+        data["performedDateTime"] = f"{performed_date}T00:00:00Z"
+    return Procedure(**data)
 
 
 def build_medication_request(
@@ -230,7 +264,7 @@ def build_observation(
     unit: str,
     unit_system: str = SYS_UCUM,
     unit_code: str | None = None,
-    effective_datetime: str,
+    effective_datetime: str | None = None,
     status: str = "final",
     category_code: str = "laboratory",
     device_id: str | None = None,
@@ -268,8 +302,11 @@ def build_observation(
         ],
         "code": _codeable_concept(code_system, code, display),
         "subject": _subject_ref(subject_id, base_url),
-        "effectiveDateTime": effective_datetime,
     }
+    # effective[x] is optional in FHIR R4; omit it when the source has no date
+    # (e.g. ACE genetic / intervention tables carry no assessment date).
+    if effective_datetime and str(effective_datetime).strip() not in ("", "nan", "TnanT00:00:00Z"):
+        obs_data["effectiveDateTime"] = effective_datetime
 
     if value is not None:
         qty_fields: dict[str, Any] = {"value": value, "system": unit_system}
@@ -392,11 +429,10 @@ def observations_from_wide_row(
     the variable name as the code — so coverage is preserved and traceable.
     part_of_ref, if provided, sets Observation.partOf for reverse linking.
     """
-    skip_cols = {"subject_id", "visit_id", "visit_date", "visit_type"}
     observations: list[Observation] = []
 
     for col, raw_val in row.items():
-        if col in skip_cols:
+        if col in STRUCTURAL_COLUMNS:
             continue
 
         mapping_key = f"{cluster}::{col}"

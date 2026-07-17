@@ -70,9 +70,17 @@ def build_graph(cfg: Any, store: TerminologyStore) -> Any:
 def initial_state(
     clusters: list[str],
     max_subjects: int | None = None,
+    dataset: dict | None = None,
+    skip_mapping: bool = False,
+    model: str = "",
+    apply_overrides: bool = True,
 ) -> PipelineState:
     """Return a fresh PipelineState for a new pipeline run."""
     return PipelineState(
+        dataset=dataset or {},
+        model=model,
+        skip_mapping=skip_mapping,
+        apply_overrides=apply_overrides,
         clusters=clusters,
         subjects=[],
         max_subjects=max_subjects,
@@ -91,8 +99,14 @@ def initial_state(
 # Export node
 
 def export_output(state: PipelineState, cfg: Any) -> PipelineState:
-    """Write one FHIR Bundle JSON per subject and a mapping_report.json to cfg.OUTPUT_DIR."""
-    output_dir: Path = cfg.OUTPUT_DIR
+    """Write one FHIR Bundle JSON per subject and a mapping_report.json.
+
+    Output is namespaced per dataset via the dataset's output_subdir, so ACE
+    bundles land in output/ace/ and never collide with the MFU bundles at
+    output/ root.
+    """
+    subdir = state.get("dataset", {}).get("output_subdir", "")
+    output_dir: Path = cfg.OUTPUT_DIR / subdir if subdir else cfg.OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_paths: list[str] = []
@@ -104,22 +118,23 @@ def export_output(state: PipelineState, cfg: Any) -> PipelineState:
         out_path.write_text(json.dumps(bundle, indent=2, ensure_ascii=False))
         output_paths.append(str(out_path))
 
-    # Write code mapping report
+    # Write code mapping report.
+    # Confidence is only meaningful for variables that actually received a
+    # standard code; a variable can be "high confidence UNMAPPED" (the model is
+    # sure no good code exists), so confidence buckets are counted ONLY among
+    # genuinely-mapped variables to avoid overstating coverage.
+    all_mappings = state.get("code_mappings", [])
+    mapped = [m for m in all_mappings if m.get("code") not in (None, "", "UNMAPPED")]
+    unmapped_n = len(all_mappings) - len(mapped)
     mapping_report = {
         "summary": {
-            "total_variables": len(state.get("code_mappings", [])),
-            "mapped_high_confidence": sum(
-                1 for m in state.get("code_mappings", []) if m.get("confidence") == "high"
-            ),
-            "mapped_medium_confidence": sum(
-                1 for m in state.get("code_mappings", []) if m.get("confidence") == "medium"
-            ),
-            "mapped_low_confidence": sum(
-                1 for m in state.get("code_mappings", []) if m.get("confidence") == "low"
-            ),
-            "unmapped": sum(
-                1 for m in state.get("code_mappings", []) if m.get("code") == "UNMAPPED"
-            ),
+            "dataset": state.get("dataset", {}).get("name", ""),
+            "total_variables": len(all_mappings),
+            "mapped_to_standard_code": len(mapped),
+            "mapped_high_confidence": sum(1 for m in mapped if m.get("confidence") == "high"),
+            "mapped_medium_confidence": sum(1 for m in mapped if m.get("confidence") == "medium"),
+            "mapped_low_confidence": sum(1 for m in mapped if m.get("confidence") == "low"),
+            "unmapped": unmapped_n,
             "subjects": len(bundles),
             "total_resources": len(state.get("fhir_resources", [])),
         },

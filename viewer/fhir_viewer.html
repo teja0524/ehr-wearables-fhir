@@ -21,6 +21,28 @@
   .btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 14px;
        font-size:14px;cursor:pointer;font-weight:600}
   .btn.ghost{background:var(--accent-soft);color:var(--accent)}
+  .sel{font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);cursor:pointer}
+  .controls{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .controls input[type=text]{flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .controls label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer}
+  .runwrap{max-width:1180px;margin:18px auto 0;padding:0 18px}
+  .runpanel{margin-bottom:0}
+  .runbody{padding:16px 18px}
+  .runrow{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .runrow label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+  .runrow label.ck{flex-direction:row;align-items:center;gap:6px}
+  .runrow input[type=file]{font-size:13px}
+  .runrow input[type=number]{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .runlog{background:#0d1117;color:#c9d1d9;border-radius:8px;padding:12px;font-size:11.5px;
+          max-height:260px;overflow:auto;white-space:pre-wrap;margin:0}
+  .edin{font-size:12.5px;padding:5px 7px;border:1px solid var(--line);border-radius:6px;width:100%;
+        font-family:inherit;background:#fff}
+  td .edin.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  tr.edited{background:var(--accent-soft)}
+  .btn.sm{padding:7px 11px;font-size:13px}
+  .badge.lowconf{background:#fdeceb;color:var(--danger)}
+  .badge.midconf{background:var(--local-soft);color:var(--local)}
+  .badge.hiconf{background:var(--std-soft);color:var(--std)}
   .wrap{display:flex;gap:18px;max-width:1180px;margin:18px auto;padding:0 18px;align-items:flex-start}
   .side{width:210px;flex:none;position:sticky;top:74px}
   .side h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px 4px}
@@ -65,20 +87,67 @@
 </head>
 <body>
 <header>
-  <div><h1>COMFORTage · FHIR Bundle Viewer</h1>
+  <div><h1>COMFORTage · FHIR Viewer</h1>
   <div class="sub">Clinical view of transformed EHR / wearables data with terminology coding</div></div>
   <div class="spacer"></div>
-  <button class="btn" id="pickBtn">Open bundle file(s)…</button>
+  <button class="btn" id="runToggle" hidden>▶ Run pipeline</button>
+  <label class="sub" for="mode" style="margin-right:-6px">View</label>
+  <select id="mode" class="sel">
+    <option value="fhir">FHIR bundles</option>
+    <option value="mapping">Mapping report</option>
+  </select>
+  <button class="btn" id="pickBtn">Open file(s)…</button>
   <input type="file" id="file" accept=".json,application/json" multiple hidden>
 </header>
+
+<div class="runwrap" id="runWrap" hidden>
+  <section class="card runpanel" id="runPanel">
+    <h2>Run the transformation pipeline</h2>
+    <div class="runbody">
+      <div class="runrow">
+        <label>Data files
+          <input type="file" id="runFiles" multiple>
+        </label>
+        <label>…or a folder
+          <input type="file" id="runDir" webkitdirectory directory multiple>
+        </label>
+      </div>
+      <div class="runrow">
+        <label>Model<select id="runModel" class="sel"></select></label>
+        <label>Dataset
+          <select id="runDataset" class="sel">
+            <option value="auto">Auto-detect</option>
+            <option value="ace">ACE</option>
+            <option value="mfu">MFU / ComfortAge</option>
+          </select>
+        </label>
+        <label>Output
+          <select id="runMode" class="sel">
+            <option value="mapping">Mapping report only</option>
+            <option value="full">Full FHIR bundles</option>
+          </select>
+        </label>
+        <label id="runMaxLabel">Patients (0 = all)<input type="number" id="runMax" value="20" min="0" style="width:90px"></label>
+        <label class="ck"><input type="checkbox" id="runSkip"> reuse cached mappings</label>
+        <label class="ck"><input type="checkbox" id="runApplyOv" checked> apply saved overrides</label>
+      </div>
+      <div class="runrow">
+        <button class="btn" id="runGo">Run</button>
+        <span id="runStatus" class="sub"></span>
+      </div>
+      <pre id="runLog" class="runlog" hidden></pre>
+    </div>
+  </section>
+</div>
 
 <div class="wrap">
   <aside class="side" id="side" hidden><h3>Patients</h3><div id="ptlist"></div></aside>
   <main id="main">
     <div class="drop" id="drop">
-      <p style="font-size:16px;margin:0 0 6px"><b>Drop a FHIR bundle JSON here</b></p>
-      <p style="margin:0">or use “Open bundle file(s)…” — load any <code>*_fhir_bundle.json</code> from the pipeline’s <code>output/</code> folder.<br>
-      Multiple files are fine; pick patients from the sidebar.</p>
+      <p style="font-size:16px;margin:0 0 6px"><b>Drop a JSON file here</b></p>
+      <p style="margin:0">or use “Open file(s)…”. Load <code>*_fhir_bundle.json</code> (FHIR bundles) or
+      <code>mapping_report.json</code> (terminology mapping) from the pipeline’s <code>output/</code> folder.<br>
+      The view switches automatically to match the file; use the <b>View</b> selector to flip between them.</p>
     </div>
   </main>
 </div>
@@ -94,6 +163,16 @@ const SYS={
  [LOCAL_SYS]:["Local","local"],
 };
 const patients={}; let current=null;
+let mappingReport=null; let viewMode="fhir"; let serverUp=false;
+let edits={}; let currentDataset="";
+const CODE_SYSTEMS=[
+ ["LOINC","http://loinc.org"],
+ ["SNOMED CT","http://snomed.info/sct"],
+ ["RxNorm","http://www.nlm.nih.gov/research/umls/rxnorm"],
+ ["ICD-10","http://hl7.org/fhir/sid/icd-10"],
+ ["NCBI Taxonomy","http://www.ncbi.nlm.nih.gov/taxonomy"],
+ ["Local (study code)","http://comfortage.example.org/fhir/CodeSystem/comfortage-local"],
+];
 
 function sysInfo(uri){ if(!uri) return ["—","other"]; if(SYS[uri]) return SYS[uri];
   return [uri.replace(/^https?:\/\//,"").split("/")[0],"other"]; }
@@ -144,7 +223,8 @@ function render(id){
   current=id; const P=patients[id]; const res=P.res; const main=document.getElementById("main");
   const byType=t=>res.filter(r=>r.resourceType===t);
   const conditions=byType("Condition"), meds=byType("MedicationRequest"),
-        allergies=byType("AllergyIntolerance"), encs=byType("Encounter"), obs=byType("Observation");
+        allergies=byType("AllergyIntolerance"), encs=byType("Encounter"), obs=byType("Observation"),
+        reports=byType("DiagnosticReport"), procedures=byType("Procedure");
 
   // interop coverage across coded clinical resources
   let std=0,loc=0;
@@ -166,6 +246,8 @@ function render(id){
       <span class="pill">${meds.length} medications</span>
       <span class="pill${allergies.length?" warn":""}">${allergies.length} allergies</span>
       <span class="pill">${obs.length} observations</span>
+      ${reports.length?`<span class="pill">${reports.length} reports</span>`:""}
+      ${procedures.length?`<span class="pill">${procedures.length} procedures</span>`:""}
       <span class="pill">${encs.length} visits</span>
     </div></div>`;
 
@@ -196,6 +278,22 @@ function render(id){
   if(allergies.length) h+=card("Allergies",allergies.length, table(["Substance","Status",""],
     allergies.map(al=>[`<span class="desc">${(al.code&&al.code.text)||"—"}</span>`,
       `<span class="sub2">${(al.clinicalStatus&&al.clinicalStatus.text)||""}</span>`,""])));
+
+  // Diagnostic reports (panels grouping observations, e.g. CSF / plasma / MRI)
+  if(reports.length) h+=card("Diagnostic reports",reports.length, table(
+    ["Report","Date","Results","Code"],
+    reports.sort((a,b)=>dt(a.effectiveDateTime)<dt(b.effectiveDateTime)?-1:1).map(r=>{
+      const cd=firstCoding(r.code)||{};
+      return [`<span class="desc">${(r.code&&r.code.text)||cd.display||"Report"}</span>`,
+        dt(r.effectiveDateTime),
+        `<span class="sub2">${(r.result&&r.result.length)||0} observations</span>`, badge(cd)];})));
+
+  // Procedures
+  if(procedures.length) h+=card("Procedures",procedures.length, table(
+    ["Procedure","Status","Date","Code"],
+    procedures.map(p=>{const cd=firstCoding(p.code)||{};
+      return [`<span class="desc">${(p.code&&p.code.text)||cd.display||"—"}</span>`,
+        `<span class="sub2">${p.status||""}</span>`, dt(p.performedDateTime), badge(cd)];})));
 
   // Observation sections (aggregated by code+display)
   const groups={};
@@ -251,20 +349,263 @@ function table(head,rows){ if(!rows.length) return empty("None recorded.");
 function empty(m){return `<div class="empty">${m}</div>`;}
 function cap(s){return s?s[0].toUpperCase()+s.slice(1):s;}
 
+// ---- mapping report view ----
+function isMappingReport(o){ return o && Array.isArray(o.mappings) && typeof o.summary==="object"; }
+const confClass={high:"hiconf",medium:"midconf",low:"lowconf"};
+
+function renderMappingReport(){
+  const main=document.getElementById("main");
+  document.getElementById("side").hidden=true;
+  if(!mappingReport){ main.innerHTML=empty("No mapping report loaded. Open a mapping_report.json file."); return; }
+  const ms=mappingReport.mappings||[];
+  const isMapped=m=>m.code && m.code!=="UNMAPPED";
+  const mapped=ms.filter(isMapped).length, unmapped=ms.length-mapped;
+  const pct=ms.length?Math.round(mapped/ms.length*100):0;
+  // per-cluster coverage
+  const byc={};
+  ms.forEach(m=>{const c=byc[m.cluster]||(byc[m.cluster]={t:0,m:0});c.t++;if(isMapped(m))c.m++;});
+  const clusterRows=Object.entries(byc).sort().map(([c,v])=>
+    [`<span class="desc">${c}</span>`,`<span class="val">${v.m}/${v.t}</span>`,
+     `<div class="bar" style="min-width:90px"><i style="width:${v.t?Math.round(v.m/v.t*100):0}%"></i></div>`]);
+
+  let h=`<div class="interop">
+    <div class="stat"><b>${ms.length}</b><span>variables</span></div>
+    <div class="stat"><b>${mapped}/${ms.length}</b><span>mapped to a standard</span>
+      <div class="bar"><i style="width:${pct}%"></i></div></div>
+    <div class="stat"><b>${unmapped}</b><span>local / unmapped</span></div>
+  </div>`;
+  currentDataset=(mappingReport.summary&&mappingReport.summary.dataset)||currentDataset;
+  h+=card("Coverage by cluster",Object.keys(byc).length,table(["Cluster","Mapped","",],clusterRows));
+  const canEdit=serverUp;
+  const ovN=ms.filter(m=>m.confidence==="override").length;
+  h+=`<div class="controls">
+        <input type="text" id="mfilter" placeholder="Filter by variable, code, display, cluster…" oninput="paintMapRows()">
+        <label><input type="checkbox" id="unmappedOnly" onchange="paintMapRows()"> unmapped only</label>
+        ${ovN?`<span class="badge hiconf" title="Saved overrides applied to this run">${ovN} override${ovN>1?"s":""} applied</span>
+        ${canEdit?`<button class="btn ghost sm" onclick="resetOverrides()">Reset overrides</button>`:""}`:""}
+        <span style="flex:1"></span>
+        ${canEdit?`<button class="btn ghost sm" id="ovSave" onclick="saveOverrides(false)">Save overrides</button>
+        <button class="btn sm" id="ovRebuild" onclick="saveOverrides(true)">Save & rebuild</button>`:""}
+        <span id="ovStatus" class="sub"></span>
+      </div>
+      <section class="card"><h2>Variable → code mappings<span class="ct" id="mcount"></span>
+        ${canEdit?'<span class="ct" style="margin-left:0;color:var(--accent)">· editable</span>':''}</h2>
+        <table><thead><tr><th>Cluster</th><th>Variable</th><th>Display</th><th>System</th><th>Code</th><th>Conf.</th></tr></thead>
+        <tbody id="mbody"></tbody></table></section>`;
+  main.innerHTML=h;
+  paintMapRows();
+}
+
+function _curVal(m){
+  const k=m.cluster+"::"+m.variable; const e=edits[k];
+  return {
+    code: e? e.code : (m.code&&m.code!=="UNMAPPED"? m.code : ""),
+    sys:  e? e.code_system : (m.code_system||""),
+    disp: e? e.display : (m.display||""),
+  };
+}
+function sysOptions(sel){
+  return CODE_SYSTEMS.map(([lab,uri])=>`<option value="${uri}"${uri===sel?" selected":""}>${lab}</option>`).join("")
+    + (sel && !CODE_SYSTEMS.some(s=>s[1]===sel) ? `<option value="${sel}" selected>${sel}</option>`:"");
+}
+function recordEdit(el){
+  const row=el.closest("tr"); const k=row.dataset.k;
+  edits[k]={ code:row.querySelector('[data-f=code]').value.trim(),
+             code_system:row.querySelector('[data-f=sys]').value,
+             display:row.querySelector('[data-f=disp]').value.trim() };
+  row.classList.add("edited");
+  const s=document.getElementById("ovStatus"); if(s) s.textContent=Object.keys(edits).length+" unsaved edit(s)";
+}
+async function saveOverrides(rebuild){
+  if(!serverUp){ return; }
+  const st=document.getElementById("ovStatus");
+  if(!Object.keys(edits).length && !rebuild){ st.textContent="No edits to save."; return; }
+  st.textContent="Saving…";
+  try{
+    const res=await fetch("/overrides",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({dataset:currentDataset, overrides:edits})});
+    const d=await res.json();
+    if(!res.ok||d.error) throw new Error(d.error||"save failed");
+    st.textContent=`Saved · ${d.count} override(s) active`;
+    if(rebuild) await rebuildBundles();
+  }catch(e){ st.textContent="Error: "+e.message; }
+}
+async function resetOverrides(){
+  if(!serverUp) return;
+  if(!confirm("Delete all saved overrides for this dataset? Future runs will map cleanly (this can't be undone).")) return;
+  const st=document.getElementById("ovStatus");
+  try{
+    const res=await fetch("/overrides/clear",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({dataset:currentDataset})});
+    const d=await res.json();
+    if(!res.ok||d.error) throw new Error(d.error||"clear failed");
+    edits={};
+    if(st) st.textContent=`Cleared ${d.removed} override(s). Run again (or Save & rebuild) for a clean mapping.`;
+  }catch(e){ if(st) st.textContent="Error: "+e.message; }
+}
+async function rebuildBundles(){
+  const st=document.getElementById("ovStatus"); st.textContent="Rebuilding bundles with your codes…";
+  try{
+    const res=await fetch("/rebuild",{method:"POST"});
+    const d=await res.json();
+    if(!res.ok||d.error) throw new Error(d.error||("HTTP "+res.status));
+    if(d.mapping_report) mappingReport=d.mapping_report;
+    let first=null; (d.bundles||[]).forEach(b=>{try{const id=ingest(b.bundle,b.id); if(!first)first=id;}catch(e){}});
+    if(first){ current=first; }
+    edits={};
+    // Stay on the mapping report so the applied overrides are visible right away;
+    // the rebuilt bundles are loaded and reachable via the View selector.
+    viewMode="mapping"; applyView();
+    const s2=document.getElementById("ovStatus");
+    if(s2) s2.textContent=`Rebuilt ${d.subjects} subject(s) with your codes · overrides shown below · switch View → FHIR bundles to inspect`;
+  }catch(e){ st.textContent="Rebuild error: "+e.message; }
+}
+
+function paintMapRows(){
+  if(!mappingReport) return;
+  const q=(document.getElementById("mfilter").value||"").toLowerCase();
+  const only=document.getElementById("unmappedOnly").checked;
+  const rows=(mappingReport.mappings||[]).filter(m=>{
+    const um=!(m.code&&m.code!=="UNMAPPED");
+    if(only&&!um) return false;
+    if(!q) return true;
+    return [m.cluster,m.variable,m.code,m.display].some(x=>String(x||"").toLowerCase().includes(q));
+  }).sort((a,b)=> (a.cluster+a.variable).localeCompare(b.cluster+b.variable));
+  const ed=serverUp;
+  const body=rows.map(m=>{
+    const k=(m.cluster||"")+"::"+(m.variable||"");
+    const um=!(m.code&&m.code!=="UNMAPPED");
+    const cf=m.confidence||"low";
+    const cls=(m.confidence==="override")?"hiconf":(um?"lowconf":(confClass[cf]||"lowconf"));
+    const confTxt=(m.confidence==="override")?"override":(um?"none":cf);
+    const dirty=!!edits[k];
+    if(ed){
+      const v=_curVal(m);
+      return `<tr data-k="${k}"${dirty?' class="edited"':''}>
+        <td><span class="sub2">${m.cluster||""}</span></td>
+        <td><span class="code">${m.variable||""}</span></td>
+        <td><input class="edin" data-f="disp" value="${(v.disp||"").replace(/"/g,'&quot;')}" oninput="recordEdit(this)"></td>
+        <td><select class="edin" data-f="sys" onchange="recordEdit(this)">${sysOptions(v.sys)}</select></td>
+        <td><input class="edin code" data-f="code" placeholder="UNMAPPED" value="${(v.code||"").replace(/"/g,'&quot;')}" oninput="recordEdit(this)"></td>
+        <td><span class="badge ${cls}">${confTxt}</span></td></tr>`;
+    }
+    const sysBadge=um?'<span class="badge local">UNMAPPED</span>':`${badge({system:m.code_system,code:m.code})}`;
+    return `<tr><td><span class="sub2">${m.cluster||""}</span></td>
+      <td><span class="code">${m.variable||""}</span></td>
+      <td><span class="desc">${m.display||""}</span></td>
+      <td>${um?'<span class="badge local">LOCAL</span>':sysInfo(m.code_system)[0]}</td>
+      <td>${sysBadge}</td>
+      <td><span class="badge ${cls}">${confTxt}</span></td></tr>`;
+  }).join("");
+  document.getElementById("mbody").innerHTML=body||`<tr><td colspan="6"><div class="empty">No matching variables.</div></td></tr>`;
+  document.getElementById("mcount").textContent=`${rows.length} shown`;
+}
+
+// ---- view switching ----
+function applyView(){
+  document.getElementById("mode").value=viewMode;
+  const drop=document.getElementById("drop");
+  if(viewMode==="mapping"){ renderMappingReport(); }
+  else {
+    document.getElementById("side").hidden=Object.keys(patients).length<1;
+    if(current) render(current);
+    else if(serverUp) document.getElementById("main").innerHTML=
+      empty("Run the pipeline above, or use “Open file(s)…” to load existing output.");
+    else document.getElementById("main").innerHTML=drop?drop.outerHTML:empty("Load a FHIR bundle.");
+  }
+}
+document.getElementById("mode").onchange=e=>{ viewMode=e.target.value; applyView(); };
+
 // ---- file loading ----
 function handleFiles(files){
-  let last=null,errs=[];
   [...files].forEach(f=>{ const r=new FileReader();
-    r.onload=()=>{ try{ last=ingest(JSON.parse(r.result),f.name.replace(/\.json$/i,"")); render(last);}
-      catch(e){ alert(`${f.name}: ${e.message}`);} };
+    r.onload=()=>{ try{
+        const obj=JSON.parse(r.result);
+        if(isMappingReport(obj)){ mappingReport=obj; currentDataset=(obj.summary&&obj.summary.dataset)||currentDataset; viewMode="mapping"; applyView(); }
+        else { const id=ingest(obj,f.name.replace(/\.json$/i,"")); viewMode="fhir"; current=id; applyView(); }
+      } catch(e){ alert(`${f.name}: ${e.message}`);} };
     r.readAsText(f); });
 }
 document.getElementById("pickBtn").onclick=()=>document.getElementById("file").click();
-document.getElementById("file").onchange=e=>handleFiles(e.target.files);
+// Reset the value after each pick so re-selecting the same file fires onchange
+// again (otherwise a second open of the same file appears to do nothing).
+document.getElementById("file").onchange=e=>{ handleFiles(e.target.files); e.target.value=""; };
 const drop=document.getElementById("drop");
 ["dragover","dragenter"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
 ["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
 document.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files.length)handleFiles(e.dataTransfer.files);});
+
+// ---- run pipeline (requires the local server.py) ----
+const $=id=>document.getElementById(id);
+async function initRunPanel(){
+  try{
+    const res=await fetch("/models");
+    if(!res.ok) throw 0;
+    const data=await res.json();
+    const sel=$("runModel");
+    sel.innerHTML=data.models.map(m=>
+      `<option value="${m.id}"${m.id===data.default?" selected":""}>${m.label}${m.key_present?"":" — key missing"}</option>`).join("");
+    // Server is up → the Run panel is the home screen and the drop box is hidden.
+    serverUp=true;
+    $("runWrap").hidden=false;
+    const d=$("drop"); if(d) d.hidden=true;
+    $("runToggle").hidden=false;
+    syncRunMode();
+    applyView();
+  }catch(e){ /* opened as a static file, no server: show the drop box as before */ }
+}
+$("runToggle").onclick=()=>{ const w=$("runWrap"); w.hidden=!w.hidden; };
+
+// Patient count only matters when building full bundles; grey it out for
+// mapping-only so it's clear why no bundles are produced then.
+function syncRunMode(){
+  const mapping=$("runMode").value==="mapping";
+  $("runMax").disabled=mapping;
+  $("runMaxLabel").style.opacity=mapping?"0.45":"1";
+  $("runMaxLabel").title=mapping?"Patient count only applies to “Full FHIR bundles”":"";
+}
+$("runMode").onchange=syncRunMode;
+
+async function runPipeline(){
+  const dirFiles=$("runDir").files, fileFiles=$("runFiles").files;
+  const files=(dirFiles&&dirFiles.length)?dirFiles:fileFiles;
+  if(!files||!files.length){ $("runStatus").textContent="Choose data files or a folder first."; return; }
+  const fd=new FormData();
+  [...files].forEach(f=>fd.append("files", f, f.webkitRelativePath||f.name));
+  fd.append("model",$("runModel").value);
+  fd.append("dataset",$("runDataset").value);
+  fd.append("mode",$("runMode").value);
+  fd.append("max_subjects",$("runMax").value||"0");
+  fd.append("skip_mapping", $("runSkip").checked?"true":"false");
+  fd.append("apply_overrides", $("runApplyOv").checked?"true":"false");
+
+  $("runGo").disabled=true;
+  $("runStatus").textContent="Running… this can take a while for full bundles.";
+  $("runLog").hidden=true;
+  try{
+    const res=await fetch("/run",{method:"POST",body:fd});
+    const data=await res.json();
+    if(!res.ok||data.error){ throw new Error(data.error||("HTTP "+res.status)); }
+    currentDataset=data.dataset||currentDataset;
+    if(data.mapping_report){ mappingReport=data.mapping_report; }
+    let firstId=null;
+    if(data.bundles && data.bundles.length){
+      data.bundles.forEach(b=>{ try{ const id=ingest(b.bundle, b.id); if(!firstId)firstId=id; }catch(e){} });
+    }
+    if(data.mode==="full" && firstId){ viewMode="fhir"; current=firstId; }
+    else { viewMode="mapping"; }
+    $("runStatus").textContent=`Done · ${data.dataset} · ${data.subjects} subject(s) · ${data.validation_errors} validation error(s)`
+      + (data.results_dir?` · saved to output/${data.dataset||""}/`:"");
+    if(data.log){ $("runLog").textContent=data.log; $("runLog").hidden=false; }
+    applyView();
+  }catch(e){
+    $("runStatus").textContent="Error: "+e.message;
+  }finally{
+    $("runGo").disabled=false;
+  }
+}
+$("runGo").onclick=runPipeline;
+initRunPanel();
 </script>
 </body>
 </html>

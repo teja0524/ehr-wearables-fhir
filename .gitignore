@@ -1,18 +1,27 @@
-.chromadb/
-
+# Secrets (Keys)
 .env
 
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 
+# Virtual environments
 venv/
 env/
+.venv/
 
+# OS / editor cruft
 .DS_Store
+.Rhistory
 
-output/
-
+# Data — never commit study data or terminology seeds
 data/
 
-.Rhistory
+# Generated artifacts
+output/
+.chromadb/
+
+# Runtime-generated technician overrides (written by the dashboard)
+overrides/

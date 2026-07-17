@@ -13,19 +13,13 @@ from typing import Any
 
 import pandas as pd
 
-from src.state import PipelineState, VariableMeta
+from src import dictionary
+from src.state import STRUCTURAL_COLUMNS, PipelineState, VariableMeta
 
 logger = logging.getLogger(__name__)
 
 # Variable types we want to map (skip string ID columns, date/visit keys, etc.)
-MAPPABLE_TYPES = {"numeric", "integer", "yesno", "categorical"}
-
-# Columns that are structural keys, never clinical measurements
-STRUCTURAL_VARS = {
-    "subject_id", "visit_id", "visit_date", "visit_type", "timestamp_utc",
-    "device_id", "source", "quantity_kind", "value", "unit",
-    "dx_index", "med_index", "taxon_id", "taxon_name", "group", "enrollment_date",
-}
+MAPPABLE_TYPES = dictionary.RAG_MAPPABLE_TYPES
 
 
 def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
@@ -33,13 +27,15 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
     LangGraph node: parse all cluster dictionary CSVs into VariableMeta records.
     Timeseries clusters are expanded by unique quantity_kind from the data file.
     """
-    registry = cfg.CLUSTER_REGISTRY
+    dataset = state.get("dataset") or _default_dataset(cfg)
+    registry = dataset["clusters"]
+    data_dir = dataset["data_dir"]
     rag_mappings = getattr(cfg, "RAG_MAPPINGS", {"rag_loinc"})
     all_meta: list[VariableMeta] = []
 
     for cluster_name in state["clusters"]:
         if cluster_name not in registry:
-            state["errors"].append(f"Cluster '{cluster_name}' not found in CLUSTER_REGISTRY")
+            state["errors"].append(f"Cluster '{cluster_name}' not found in dataset registry")
             continue
 
         cluster_cfg = registry[cluster_name]
@@ -51,23 +47,20 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
             logger.info("Skipping schema parse for '%s' (deterministic mapping)", cluster_name)
             continue
 
-        dict_path = cfg.SAMPLE_DIR / cluster_cfg["dict_file"]
         strategy = cluster_cfg.get("strategy", "wide_lab")
-
-        if not dict_path.exists():
-            state["errors"].append(f"Dictionary file not found: {dict_path}")
-            continue
-
-        logger.info("Parsing schema for cluster '%s' from %s", cluster_name, dict_path.name)
+        logger.info("Parsing schema for cluster '%s'", cluster_name)
 
         try:
             if strategy == "timeseries":
-                meta_list = _parse_timeseries_cluster(cluster_name, cluster_cfg, dict_path, cfg)
+                dict_path = data_dir / cluster_cfg["dict_file"]
+                meta_list = _parse_timeseries_cluster(cluster_name, cluster_cfg, dict_path, cfg, dataset)
             elif strategy == "medication_request":
-                meta_list = _parse_medication_cluster(cluster_name, cluster_cfg, cfg)
+                meta_list = _parse_medication_cluster(cluster_name, cluster_cfg, cfg, dataset)
+            elif dataset.get("dict_format") == "ace_xlsx" or strategy == "ace_table":
+                meta_list = _parse_dictionary_cluster(cluster_name, cluster_cfg, dataset)
             else:
                 meta_list = _parse_wide_cluster(
-                    cluster_name, dict_path, cluster_cfg.get("dict_form")
+                    cluster_name, data_dir / cluster_cfg["dict_file"], cluster_cfg.get("dict_form")
                 )
 
             logger.info("  → %d mappable variables found", len(meta_list))
@@ -83,6 +76,40 @@ def parse_schema(state: PipelineState, cfg: Any) -> PipelineState:
     return state
 
 
+def _default_dataset(cfg: Any) -> dict:
+    """Fallback dataset config (MFU) when state carries none — backward compat."""
+    return cfg.DATASETS[cfg.DEFAULT_DATASET]
+
+
+def _parse_dictionary_cluster(
+    cluster_name: str, cluster_cfg: dict, dataset: dict
+) -> list[VariableMeta]:
+    """
+    Parse a cluster whose variables come from a unified data dictionary
+    (the ACE Excel workbook). Only variables that map to a measured FHIR
+    resource (Observation / DiagnosticReport) of a mappable type are sent to
+    the code mapper; Conditions, Procedures, Patient fields and dates are built
+    deterministically by the FHIR builder and skipped here.
+    """
+    variables = dictionary.load_cluster_variables(dataset, cluster_cfg, cluster_name)
+    meta_list: list[VariableMeta] = []
+    for var, meta in variables.items():
+        if var == dataset.get("id_col"):
+            continue
+        if not dictionary.is_rag_mappable(meta):
+            continue
+        meta_list.append(VariableMeta(
+            variable=var,
+            label=meta["label"],
+            units=meta["units"],
+            var_type=meta["type"],
+            min_val="", max_val="",
+            notes=meta["notes"][:200],
+            cluster=cluster_name,
+        ))
+    return meta_list
+
+
 def _parse_wide_cluster(
     cluster_name: str, dict_path: Path, dict_form: str | None = None
 ) -> list[VariableMeta]:
@@ -91,19 +118,12 @@ def _parse_wide_cluster(
     # Dictionary may contain rows for multiple forms (e.g. clinical_dictionary
     # holds vitals + lifestyle + diagnoses + medications). Filter to this
     # cluster's form: explicit 'dict_form' wins, else fall back to a name match.
-    if "form" in df.columns:
-        if dict_form:
-            df = df[df["form"] == dict_form]
-        else:
-            forms_in_dict = df["form"].unique()
-            matching_forms = [f for f in forms_in_dict if cluster_name in f or f in cluster_name]
-            if matching_forms:
-                df = df[df["form"].isin(matching_forms)]
+    df = dictionary.select_form_rows(df, cluster_name, dict_form)
 
     meta_list: list[VariableMeta] = []
     for _, row in df.iterrows():
         var = str(row.get("variable", "")).strip()
-        if not var or var in STRUCTURAL_VARS:
+        if not var or var in STRUCTURAL_COLUMNS:
             continue
         var_type = str(row.get("type", "")).strip().lower()
         if var_type not in MAPPABLE_TYPES:
@@ -124,16 +144,16 @@ def _parse_wide_cluster(
 
 
 def _parse_medication_cluster(
-    cluster_name: str, cluster_cfg: dict, cfg: Any
+    cluster_name: str, cluster_cfg: dict, cfg: Any, dataset: dict
 ) -> list[VariableMeta]:
     """
     Expand a medications table into one VariableMeta per distinct drug name.
     Each drug is mapped to an RxNorm ingredient by the CodeMapper.
     """
-    data_path = cfg.SAMPLE_DIR / cluster_cfg["data_file"]
+    data_path = dataset["data_dir"] / cluster_cfg["data_file"]
     if not data_path.exists():
         return []
-    df = pd.read_csv(data_path)
+    df = dictionary.read_table(data_path, dataset)
     drug_col = cluster_cfg.get("drug_col", "drug_name")
     if drug_col not in df.columns:
         return []
@@ -153,17 +173,18 @@ def _parse_timeseries_cluster(
     cluster_cfg: dict,
     dict_path: Path,
     cfg: Any,
+    dataset: dict,
 ) -> list[VariableMeta]:
     """
     Parse a timeseries cluster by expanding unique quantity_kind values from the data file.
     Unit and value range are inferred from the data itself.
     """
-    data_path = cfg.SAMPLE_DIR / cluster_cfg["data_file"]
+    data_path = dataset["data_dir"] / cluster_cfg["data_file"]
     if not data_path.exists():
         logger.warning("Data file not found: %s — skipping timeseries expansion", data_path)
         return []
 
-    data_df = pd.read_csv(data_path)
+    data_df = dictionary.read_table(data_path, dataset)
     kind_col = cluster_cfg.get("kind_col", "quantity_kind")
     unit_col = cluster_cfg.get("unit_col", "unit")
     value_col = cluster_cfg.get("value_col", "value")
@@ -183,7 +204,8 @@ def _parse_timeseries_cluster(
     if not kind_notes_row.empty:
         kind_notes_text = str(kind_notes_row.iloc[0].get("notes", ""))
 
-    # Human-readable descriptions per quantity_kind (built from the domain knowledge of Claude)
+    # Curated human-readable descriptions per wearable quantity_kind, used to
+    # enrich the vector-search query when the dictionary label is terse.
     KIND_LABELS = {
         "heart_rate": "Heart rate (continuous, hourly average)",
         "heart_rate_resting": "Resting heart rate (daily baseline)",

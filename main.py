@@ -32,10 +32,16 @@ def parse_args() -> argparse.Namespace:
         description="EHR/Wearables → FHIR R4 multi-agent transformation pipeline"
     )
     parser.add_argument(
+        "--dataset",
+        default="mfu",
+        help="Which dataset to process: 'mfu' or 'ace' (default: mfu)",
+    )
+    parser.add_argument(
         "--clusters",
         nargs="+",
-        default=["blood_labs", "blood_cytokines", "wearables"],
-        help="Which clusters to process (default: blood_labs blood_cytokines wearables)",
+        default=None,
+        help="Which clusters to process. Use 'all' for every cluster in the "
+             "dataset. Defaults to a small demo set for mfu, all clusters for ace.",
     )
     parser.add_argument(
         "--max-subjects",
@@ -49,6 +55,18 @@ def parse_args() -> argparse.Namespace:
         help="Skip LLM code mapping step (uses cached mapping_index if available)",
     )
     parser.add_argument(
+        "--model",
+        default=None,
+        help="LLM model id for code mapping (default: config.CLAUDE_MODEL). "
+             "Non-Anthropic models route through LiteLLM and need that provider's API key.",
+    )
+    parser.add_argument(
+        "--mapping-only",
+        action="store_true",
+        help="Run schema parse + code mapping only and write mapping_report.json; "
+             "do NOT build FHIR bundles",
+    )
+    parser.add_argument(
         "--rebuild-store",
         action="store_true",
         help="Delete and rebuild the ChromaDB vector store",
@@ -57,6 +75,39 @@ def parse_args() -> argparse.Namespace:
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
+    )
+    # --- build-time seed enrichment (offline; not part of a pipeline run) ---
+    parser.add_argument(
+        "--enrich-seed",
+        action="store_true",
+        help="BUILD-TIME: query UMLS for standard codes for rag-mappable variables "
+             "(all datasets by default) and write a review CSV to "
+             "data/terminology/seed_candidates/. Does NOT run the pipeline.",
+    )
+    parser.add_argument(
+        "--apply-seed",
+        action="store_true",
+        help="BUILD-TIME: append accept=Y rows from the seed review CSV into the "
+             "shared seed CSVs (deduped). Does NOT run the pipeline.",
+    )
+    parser.add_argument(
+        "--seed-test",
+        metavar="TERM",
+        default=None,
+        help="BUILD-TIME: print raw UMLS hits for one term (diagnostic).",
+    )
+    parser.add_argument(
+        "--seed-only-unmapped",
+        metavar="PATH",
+        default="",
+        help="With --enrich-seed: restrict to variables currently UNMAPPED, read "
+             "from a mapping_cache.json / mapping_report.json.",
+    )
+    parser.add_argument(
+        "--seed-datasets",
+        default="",
+        help="With --enrich-seed: comma list of datasets to source variable labels "
+             "from (default: all). The seed itself is always shared.",
     )
     return parser.parse_args()
 
@@ -74,21 +125,49 @@ def main() -> int:
 
     import config as cfg
 
+    # --- build-time seed enrichment: short-circuit before the pipeline ------
+    # These modes are offline terminology management (UMLS), not a pipeline run,
+    # and enrich the SHARED seed across all datasets — so no dataset is required
+    # and the Claude key is not needed.
+    if args.enrich_seed or args.apply_seed or args.seed_test:
+        from tools.umls_seed_builder import run_build, run_apply, run_test
+        if args.seed_test:
+            run_test(args.seed_test)
+        elif args.enrich_seed:
+            names = [d.strip() for d in args.seed_datasets.split(",") if d.strip()] or None
+            run_build(dataset_names=names, only_unmapped=args.seed_only_unmapped)
+        elif args.apply_seed:
+            run_apply()
+        return 0
+
     if not cfg.ANTHROPIC_API_KEY:
         console.print("[red]ERROR:[/red] ANTHROPIC_API_KEY not set. "
                       "Create a .env file with ANTHROPIC_API_KEY=sk-ant-...")
         return 1
 
-    # "--clusters all" expands to every registered data cluster.
+    # Resolve the active dataset.
+    if args.dataset not in cfg.DATASETS:
+        console.print(f"[red]ERROR:[/red] Unknown dataset '{args.dataset}'. "
+                      f"Choose from: {', '.join(cfg.DATASETS)}")
+        return 1
+    dataset = cfg.DATASETS[args.dataset]
+
+    # Default cluster selection per dataset; "all" expands to every cluster.
+    if not args.clusters:
+        args.clusters = (
+            ["blood_labs", "blood_cytokines", "wearables"]
+            if args.dataset == "mfu" else list(dataset["all_clusters"])
+        )
     if len(args.clusters) == 1 and args.clusters[0].lower() == "all":
-        args.clusters = list(cfg.ALL_DATA_CLUSTERS)
+        args.clusters = list(dataset["all_clusters"])
 
     max_subjects = args.max_subjects if args.max_subjects > 0 else None
     console.print(
         f"[green]✓[/green] Config loaded | "
+        f"Dataset: {args.dataset} | "
         f"Clusters: {args.clusters} | "
         f"Max subjects: {max_subjects or 'all'} | "
-        f"Model: {cfg.CLAUDE_MODEL}"
+        f"Model: {args.model or cfg.CLAUDE_MODEL}"
     )
 
     from src.vector_store.store import TerminologyStore
@@ -106,7 +185,36 @@ def main() -> int:
 
     console.print(f"[green]✓[/green] Vector store ready ({time.time()-t0:.1f}s)")
 
-    from src.graph import build_graph, initial_state
+    from src.graph import build_graph, initial_state, export_output
+
+    state = initial_state(
+        clusters=args.clusters,
+        max_subjects=max_subjects,
+        dataset=dataset,
+        skip_mapping=args.skip_mapping,
+        model=args.model or cfg.CLAUDE_MODEL,
+    )
+
+    # Mapping-only mode: run just schema parse + code mapping, then write the
+    # mapping report (no bundles are built). Fast way to inspect/iterate on
+    # terminology coverage without the expensive FHIR build.
+    if args.mapping_only:
+        from src.agents.schema_parser import parse_schema
+        from src.agents.code_mapper import map_codes
+
+        console.print("\n[bold]Mapping-only mode:[/bold] schema parse + code mapping (no bundles)\n")
+        t1 = time.time()
+        state = parse_schema(state, cfg)
+        state = map_codes(state, cfg, store)
+        # export_output writes only mapping_report.json when there are no bundles.
+        state = export_output(state, cfg)
+        elapsed = time.time() - t1
+        console.print(f"\n[green]✓[/green] Mapping completed in {elapsed:.1f}s")
+        _print_summary(state, elapsed)
+        subdir = dataset.get("output_subdir", "")
+        report = (cfg.OUTPUT_DIR / subdir / "mapping_report.json") if subdir else (cfg.OUTPUT_DIR / "mapping_report.json")
+        console.print(f"\n[bold]Mapping report:[/bold] [cyan]{report}[/cyan]")
+        return 1 if state.get("errors") else 0
 
     console.print("\n[bold]Step 2/5:[/bold] Building LangGraph agent pipeline...")
     pipeline = build_graph(cfg, store)
@@ -114,11 +222,6 @@ def main() -> int:
 
     console.print(f"\n[bold]Step 3-5/5:[/bold] Running pipeline on {args.clusters}...\n")
     t1 = time.time()
-
-    state = initial_state(
-        clusters=args.clusters,
-        max_subjects=max_subjects,
-    )
 
     final_state = pipeline.invoke(state)
 
@@ -168,12 +271,13 @@ def _print_summary(state: dict, elapsed: float) -> None:
                 "medium": "yellow",
                 "low": "red",
             }.get(m.get("confidence", "low"), "white")
+            display = str(m.get("display") or "")
             table.add_row(
-                m["cluster"],
-                m["variable"],
-                m["code"],
-                m["display"][:36] + ("…" if len(m["display"]) > 36 else ""),
-                f"[{conf_style}]{m['confidence']}[/{conf_style}]",
+                str(m.get("cluster", "")),
+                str(m.get("variable", "")),
+                str(m.get("code") or ""),
+                display[:36] + ("…" if len(display) > 36 else ""),
+                f"[{conf_style}]{m.get('confidence', 'low')}[/{conf_style}]",
             )
 
         if len(mappings) > 20:

@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Required fields per resource type
 REQUIRED_FIELDS: dict[str, list[str]] = {
-    "Observation": ["status", "code", "subject", "effectiveDateTime"],
+    # effective[x] is optional in FHIR R4 (some sources carry no assessment date),
+    # so it is checked as a warning in _validate_observation, not required here.
+    "Observation": ["status", "code", "subject"],
     "DiagnosticReport": ["status", "code", "subject"],
     "Patient": ["id"],
     "Bundle": ["type", "entry"],
@@ -27,6 +29,7 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "Condition": ["code", "subject"],
     "MedicationRequest": ["status", "intent", "subject"],
     "AllergyIntolerance": ["patient"],
+    "Procedure": ["status", "subject"],
 }
 
 VALID_CODE_SYSTEMS = {

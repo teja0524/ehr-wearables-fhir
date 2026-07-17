@@ -11,15 +11,33 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 TERMINOLOGY_DIR = DATA_DIR / "terminology"
-SAMPLE_DIR = DATA_DIR / "sample"
+SAMPLE_DIR = DATA_DIR / "sample"            # MFU/ComfortAge sample data
+SAMPLE_ACE_DIR = DATA_DIR / "sample_ACE"    # ACE study data
 OUTPUT_DIR = BASE_DIR / "output"
+OVERRIDES_DIR = BASE_DIR / "overrides"  # technician code overrides (per dataset)
 CHROMA_DIR = BASE_DIR / ".chromadb"   # persisted vector store
 
 # Anthropic / Claude
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 # Model used by all agents. Haiku keeps the per-run cost low; bump to
-# claude-sonnet-4-6 (or claude-opus-4-6) if mapping quality underperforms.
+# claude-sonnet-4-6 (or claude-opus-4-8) if mapping quality underperforms.
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
+# Models offered in the dashboard / --model flag. Anthropic uses the native SDK;
+# all others route through LiteLLM (see src/llm.py) and need that provider's API
+# key in .env. Model ids for non-Anthropic providers follow LiteLLM's naming and
+# may need updating as providers release new versions.
+#   {"label": shown in UI, "id": model id, "provider": ..., "key": env var needed}
+MODEL_CHOICES = [
+    {"label": "Claude Haiku (fast, cheap)", "id": "claude-haiku-4-5-20251001", "provider": "Anthropic", "key": "ANTHROPIC_API_KEY"},
+    {"label": "Claude Sonnet", "id": "claude-sonnet-4-6", "provider": "Anthropic", "key": "ANTHROPIC_API_KEY"},
+    {"label": "Claude Opus (best)", "id": "claude-opus-4-8", "provider": "Anthropic", "key": "ANTHROPIC_API_KEY"},
+    {"label": "OpenAI GPT-4o", "id": "gpt-4o", "provider": "OpenAI", "key": "OPENAI_API_KEY"},
+    {"label": "OpenAI GPT-4o mini", "id": "gpt-4o-mini", "provider": "OpenAI", "key": "OPENAI_API_KEY"},
+    {"label": "Google Gemini 1.5 Pro", "id": "gemini/gemini-1.5-pro", "provider": "Google", "key": "GEMINI_API_KEY"},
+    {"label": "Google Gemini 1.5 Flash", "id": "gemini/gemini-1.5-flash", "provider": "Google", "key": "GEMINI_API_KEY"},
+    {"label": "Meta Llama 3.3 70B (Groq)", "id": "groq/llama-3.3-70b-versatile", "provider": "Meta/Groq", "key": "GROQ_API_KEY"},
+]
 
 # Vector store
 # Sentence-transformers model for embedding terminology terms
@@ -35,11 +53,11 @@ FHIR_VERSION: str = "4.0.1"
 # Base URL used in FHIR resource identifiers (can be changed to actual while deploying)
 FHIR_BASE_URL: str = "http://comfortage.example.org/fhir"
 
-# Code system URIs
-SYSTEM_LOINC: str = "http://loinc.org"
-SYSTEM_SNOMED: str = "http://snomed.info/sct"
-SYSTEM_RXNORM: str = "http://www.nlm.nih.gov/research/umls/rxnorm"
-SYSTEM_NCBI_TAXON: str = "http://www.ncbi.nlm.nih.gov/taxonomy"
+# Code system URIs.
+# The standard-vocabulary URIs (LOINC/SNOMED/RxNorm/NCBI taxonomy) live in
+# src.fhir.resources (SYS_*); only the two systems referenced directly from
+# config are defined here.
+SYSTEM_ICD10: str = "http://hl7.org/fhir/sid/icd-10"
 # Local project code system for study-specific instruments and indices that
 # have no standard LOINC/SNOMED/RxNorm representation (questionnaire totals,
 # dental indices, microbiome metrics, EEG band powers).
@@ -218,3 +236,146 @@ MAPPING_VOCABS = {
     "rag_rxnorm": ["rxnorm"],
     "rag_clinical": ["loinc", "snomed"],
 }
+
+
+# ---------------------------------------------------------------------------
+# ACE study dataset
+# ---------------------------------------------------------------------------
+# The ACE data differs structurally from the MFU/ComfortAge sample:
+#   * files are semicolon-delimited
+#   * the subject identifier column is 'faceid' (not 'subject_id')
+#   * a single Excel workbook documents every variable, with an explicit
+#     FHIR_RESOURCE column (Patient / Observation / Condition / DiagnosticReport
+#     / Procedure) that drives how each column is transformed.
+#
+# Two ACE-specific builder strategies cover all clusters:
+#   'ace_table'   → dictionary-driven; routes each column to an Observation,
+#                   Condition, or DiagnosticReport-grouped Observation based on
+#                   its FHIR_RESOURCE. Codes for measures come from the same RAG
+#                   mapper as MFU (LOINC/SNOMED), with a local-code fallback.
+#   'ace_patient' → demographics → Patient (gender, birthDate) plus
+#                   education Observations.
+#   'ace_procedure' → intervention flag → Procedure.
+#
+# 'dict_category' selects this cluster's rows from the shared ACE dictionary
+# (its CATEGORY column). 'default_resource' is used when a column's
+# FHIR_RESOURCE cell is blank in the dictionary.
+ACE_DICT_FILE = "ace_v2.dictionary_FTSS.xlsx"
+
+ACE_ALL_CLUSTERS = [
+    "ace_demographic", "ace_anthropometric", "ace_csf", "ace_plasma",
+    "ace_mri", "ace_genetic", "ace_neurology", "ace_neuropsychology",
+    "ace_intervention",
+]
+
+ACE_CLUSTER_REGISTRY = {
+    "ace_demographic": {
+        "data_file": "demographic.csv",
+        "strategy": "ace_patient", "mapping": "local",
+        "dict_category": "demographic", "id_col": "faceid",
+        "sex_col": "sex_0M1F", "birth_col": "date_of_birth",
+    },
+    "ace_anthropometric": {
+        "data_file": "anthropometric.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "anthropometric", "id_col": "faceid",
+        "date_col": "anthropometric_date",
+        "fhir_category": "vital-signs",
+        "default_resource": "Observation",
+        "local_fallback": True, "no_report": True,
+    },
+    "ace_csf": {
+        "data_file": "csf.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "csf", "id_col": "faceid", "date_col": "csf_date",
+        "fhir_category": "laboratory",
+        "default_resource": "Observation",
+        "local_fallback": True, "make_report": True,
+        "report_title": "CSF Biomarker Panel",
+        "report_loinc": ("33717-0", "Cerebrospinal fluid panel"),
+    },
+    "ace_plasma": {
+        "data_file": "plasma.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "plasma", "id_col": "faceid", "date_col": "plasma_date",
+        "fhir_category": "laboratory",
+        "default_resource": "Observation",
+        "local_fallback": True, "make_report": True,
+        "report_title": "Plasma Biomarker Panel",
+        "report_loinc": ("11502-2", "Laboratory report"),
+    },
+    "ace_mri": {
+        "data_file": "mri.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "mri", "id_col": "faceid", "date_col": "mri_date",
+        "fhir_category": "imaging",
+        "default_resource": "Observation",
+        "local_fallback": True, "make_report": True,
+        "report_title": "Brain MRI Volumetric Summary",
+        "report_loinc": ("24590-2", "MR Brain"),
+    },
+    "ace_genetic": {
+        "data_file": "genetic.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "genetic", "id_col": "faceid", "date_col": None,
+        "fhir_category": "laboratory",
+        "default_resource": "Observation",
+        "local_fallback": True, "no_report": True,
+    },
+    "ace_neurology": {
+        "data_file": "neurology.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "neurology", "id_col": "faceid",
+        "date_col": "neurology_date",
+        "fhir_category": "survey",
+        "default_resource": "Observation",
+        "local_fallback": True, "no_report": True,
+    },
+    "ace_neuropsychology": {
+        "data_file": "neuropsychology.csv",
+        "strategy": "ace_table", "mapping": "rag_clinical",
+        "dict_category": "neuropsychology", "id_col": "faceid",
+        "date_col": "neuropsychology_date",
+        "fhir_category": "survey",
+        "default_resource": "Observation",
+        "local_fallback": True, "no_report": True,
+    },
+    "ace_intervention": {
+        "data_file": "intervention.csv",
+        "strategy": "ace_procedure", "mapping": "local",
+        "dict_category": "intervention", "id_col": "faceid", "date_col": None,
+        "flag_col": "intervention_0N1Y",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Dataset registry — the single switch the pipeline reads to know how to load
+# and route a study's data. Add a new study by adding an entry here.
+# ---------------------------------------------------------------------------
+DATASETS = {
+    "mfu": {
+        "name": "mfu",
+        "data_dir": SAMPLE_DIR,
+        "delimiter": ",",
+        "dict_format": "mfu_csv",   # per-cluster dictionary CSVs
+        "dict_file": None,
+        "id_col": "subject_id",
+        "clusters": CLUSTER_REGISTRY,
+        "all_clusters": ALL_DATA_CLUSTERS,
+        "output_subdir": "",        # MFU bundles stay at output/ root
+    },
+    "ace": {
+        "name": "ace",
+        "data_dir": SAMPLE_ACE_DIR,
+        "delimiter": ";",
+        "dict_format": "ace_xlsx",  # one shared Excel dictionary
+        "dict_file": ACE_DICT_FILE,
+        "id_col": "faceid",
+        "clusters": ACE_CLUSTER_REGISTRY,
+        "all_clusters": ACE_ALL_CLUSTERS,
+        "output_subdir": "ace",     # ACE bundles → output/ace/
+    },
+}
+
+DEFAULT_DATASET = "mfu"

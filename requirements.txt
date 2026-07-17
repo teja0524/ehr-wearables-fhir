@@ -1,8 +1,6 @@
 # Core LLM / Agent framework
 anthropic>=0.28.0
 langgraph>=0.2.0
-langchain-anthropic>=0.2.0
-langchain-core>=0.3.0
 
 # Vector store + embeddings
 chromadb>=0.5.0
@@ -11,6 +9,7 @@ sentence-transformers>=3.0.0
 # Data handling
 pandas>=2.0.0
 numpy>=1.26.0
+openpyxl>=3.1.0       # read the ACE Excel data dictionary
 
 # FHIR
 fhir.resources>=7.1.0
@@ -19,3 +18,7 @@ fhir.resources>=7.1.0
 python-dotenv>=1.0.0
 rich>=13.0.0          # pretty console output
 pydantic>=2.0.0
+
+# Dashboard server + multi-provider LLM routing
+flask>=3.0.0          # local run-from-dashboard server (server.py)
+litellm>=1.40.0       # OpenAI / Gemini / Meta model routing (non-Anthropic)
