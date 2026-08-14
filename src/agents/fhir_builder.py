@@ -634,11 +634,20 @@ def _process_eeg(df, subjects, cluster_cfg, subject_models, cfg, local_system, d
         subject_models[subject_id].extend(obs_list)
         report_id = f"dr-{subject_id}-eeg-{eeg_date}".replace("_", "-")
         obs_refs = [f"{cfg.FHIR_BASE_URL}/Observation/{o.id}" for o in obs_list]
+        # The grouping DiagnosticReport has no corresponding variable in the
+        # data, so no code comes from the mapper. It previously carried a
+        # hardcoded LOINC code that does not exist in LOINC (it failed both the
+        # check digit and terminology lookup). Rather than substitute another
+        # unverified code, the report is coded in the project-local CodeSystem —
+        # consistent with how the EEG Observations themselves are coded, and
+        # honest about the absence of a verified standard code.
         report = build_diagnostic_report(
             subject_id=subject_id, report_id=report_id,
             effective_date=eff, observation_refs=obs_refs,
             title="Resting-state EEG quantitative summary",
-            loinc_code="24708-6", loinc_display="EEG study",
+            loinc_code="eeg_quantitative_summary",
+            loinc_display="Resting-state EEG quantitative summary",
+            code_system=local_system,
             base_url=cfg.FHIR_BASE_URL,
         )
         subject_models[subject_id].insert(

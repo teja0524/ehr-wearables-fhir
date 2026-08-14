@@ -54,6 +54,28 @@ def _codeable_concept(
     )
 
 
+def _multi_codeable_concept(
+    system: str, code: str, display: str | None,
+    additional: list[tuple[str, str, str]] | None = None,
+) -> CodeableConcept:
+    """
+    CodeableConcept carrying one or more codings for the same concept.
+
+    FHIR models `CodeableConcept.coding` as 0..* precisely so a concept can be
+    expressed in several vocabularies or at several levels of specificity at
+    once. Duplicate (system, code) pairs are dropped.
+    """
+    codings = [_coding(system, code, display)]
+    seen = {(system, str(code))}
+    for sys_, code_, disp_ in additional or []:
+        key = (sys_, str(code_))
+        if key in seen:
+            continue
+        seen.add(key)
+        codings.append(_coding(sys_, code_, disp_))
+    return CodeableConcept(coding=codings, text=display)
+
+
 def _subject_ref(subject_id: str, base_url: str) -> Reference:
     return Reference(
         reference=f"{base_url}/Patient/{subject_id}",
@@ -249,9 +271,66 @@ _CATEGORY_DISPLAY = {
     "procedure":      "Procedure",
 }
 
-# Vital-signs Observations must carry the vitalsigns profile per FHIR spec
 _VITAL_SIGNS_PROFILE = [PROFILE_VITALSIGNS]
 _BASE_OBS_PROFILE    = [PROFILE_OBSERVATION]
+
+# LOINC codes the FHIR R4 vital-signs profile recognises ("magic codes").
+# These are constants published BY the specification — see
+# https://hl7.org/fhir/R4/observation-vitalsigns.html — not terminology chosen
+# by this project, so encoding them here is equivalent to encoding the system
+# URIs above.
+#
+# The profile requires the magic code to be present for its concept: an
+# Observation claiming `vitalsigns` while carrying only a more specific code
+# (e.g. 40443-4 "Heart rate --resting" instead of 8867-4 "Heart rate") is a
+# conformance error. Blood pressure additionally requires a single Observation
+# coded 85354-9 carrying systolic/diastolic `component` slices, which this
+# pipeline does not yet produce (it emits the two measurements separately).
+#
+# The profile is therefore declared only when the code actually satisfies it —
+# claiming conformance that is not met is worse than not claiming it.
+_VITAL_SIGNS_MAGIC_CODES = {
+    "85354-9",   # Blood pressure panel (requires components)
+    "8480-6",    # Systolic blood pressure   (component of the panel)
+    "8462-4",    # Diastolic blood pressure  (component of the panel)
+    "8867-4",    # Heart rate
+    "9279-1",    # Respiratory rate
+    "8310-5",    # Body temperature
+    "8302-2",    # Body height
+    "9843-4",    # Head circumference
+    "29463-7",   # Body weight
+    "39156-5",   # Body mass index
+    "59408-5",   # Oxygen saturation
+    "2708-6",    # Oxygen saturation in arterial blood
+}
+
+# Codes that satisfy the profile as a simple valueQuantity Observation. The
+# systolic/diastolic component codes are excluded because they are only valid
+# INSIDE a blood-pressure panel, never as standalone vital-signs Observations;
+# the panel code 85354-9 is included, since the builder now emits it correctly
+# with both components.
+_VITAL_SIGNS_STANDALONE = _VITAL_SIGNS_MAGIC_CODES - {"8480-6", "8462-4"}
+
+
+def _observation_profile(
+    category_code: str, code: str,
+    additional_codings: list[tuple[str, str, str]] | None = None,
+) -> list[str]:
+    """
+    Choose the profile to declare for an Observation.
+
+    `meta.profile` asserts conformance and the official validator enforces
+    whatever is asserted, so vital-signs is claimed only where the Observation
+    genuinely satisfies it. ALL codings count, not just the primary one: an
+    Observation coded 40443-4 that also carries the required 8867-4 does satisfy
+    the profile.
+    """
+    if category_code != "vital-signs":
+        return _BASE_OBS_PROFILE
+    codes = {str(code)} | {str(c) for _, c, _ in (additional_codings or [])}
+    if codes & _VITAL_SIGNS_STANDALONE:
+        return _VITAL_SIGNS_PROFILE
+    return _BASE_OBS_PROFILE
 
 
 def build_observation(
@@ -271,6 +350,8 @@ def build_observation(
     part_of_ref: str | None = None,
     value_string: str | None = None,
     value_codeable: tuple[str, str, str] | None = None,
+    additional_codings: list[tuple[str, str, str]] | None = None,
+    components: list[dict] | None = None,
     base_url: str,
     obs_id: str | None = None,
 ) -> Observation:
@@ -279,7 +360,15 @@ def build_observation(
     Value precedence: valueQuantity (numeric) → valueCodeableConcept → valueString.
     If none is present, dataAbsentReason is set.
     device_id populates Observation.device for wearable data.
-    part_of_ref populates Observation.partOf for reverse linking to a DiagnosticReport.
+
+    additional_codings adds further codings to Observation.code. The FHIR
+    vital-signs profiles require a specific "magic" LOINC code per concept and
+    explicitly permit other codes alongside it, so a more specific code (e.g.
+    40443-4 "Heart rate --resting") is carried together with the required one
+    (8867-4 "Heart rate") rather than replacing it.
+
+    components populates Observation.component, needed for concepts the spec
+    models as a single Observation with parts — notably blood pressure.
     """
     resource_id = obs_id or make_resource_id("obs-")
     cat_display = _CATEGORY_DISPLAY.get(category_code, category_code.title())
@@ -288,8 +377,8 @@ def build_observation(
     if value is not None and value != value:
         value = None
 
-    # Vital-signs carry a different mandatory profile per FHIR spec
-    profile = _VITAL_SIGNS_PROFILE if category_code == "vital-signs" else _BASE_OBS_PROFILE
+    # Declare the vital-signs profile only where the codings satisfy it.
+    profile = _observation_profile(category_code, code, additional_codings)
 
     obs_data: dict[str, Any] = {
         "id": resource_id,
@@ -300,7 +389,7 @@ def build_observation(
                 coding=[_coding(SYS_OBS_CATEGORY, category_code, cat_display)]
             )
         ],
-        "code": _codeable_concept(code_system, code, display),
+        "code": _multi_codeable_concept(code_system, code, display, additional_codings),
         "subject": _subject_ref(subject_id, base_url),
     }
     # effective[x] is optional in FHIR R4; omit it when the source has no date
@@ -326,6 +415,21 @@ def build_observation(
             SYS_ABSENT_REASON, "unknown", "Unknown"
         )
 
+    if components:
+        obs_data["component"] = [
+            ObservationComponent(
+                code=_codeable_concept(c["system"], c["code"], c.get("display")),
+                valueQuantity=Quantity(
+                    value=c["value"], unit=c.get("unit"),
+                    system=SYS_UCUM, code=c.get("unit_code") or c.get("unit"),
+                ),
+            )
+            for c in components
+        ]
+        # A panel Observation carries its measurements in components, so the
+        # top-level value[x] is absent by design — not missing data.
+        obs_data.pop("dataAbsentReason", None)
+
     if device_id:
         obs_data["device"] = Reference(
             identifier=Identifier(
@@ -334,8 +438,17 @@ def build_observation(
             )
         )
 
-    if part_of_ref:
-        obs_data["partOf"] = [Reference(reference=part_of_ref)]
+    # NOTE: `part_of_ref` is accepted for call-site compatibility but is no
+    # longer emitted. FHIR R4 restricts Observation.partOf to
+    # MedicationAdministration | MedicationDispense | MedicationStatement |
+    # Procedure | Immunization | ImagingStudy — DiagnosticReport is NOT a legal
+    # target, and referencing one is a conformance error.
+    #
+    # The Observation↔DiagnosticReport relationship is deliberately
+    # one-directional in FHIR: DiagnosticReport.result points to its member
+    # Observations, and consumers resolve the reverse direction by search
+    # (`_revinclude=DiagnosticReport:result`) rather than by a stored
+    # back-pointer. The link is therefore already fully expressed in the bundle.
 
     return Observation(**obs_data)
 
@@ -351,9 +464,16 @@ def build_diagnostic_report(
     title: str = "Laboratory Report",
     loinc_code: str = "11502-2",
     loinc_display: str = "Laboratory report",
+    code_system: str = SYS_LOINC,
     base_url: str,
 ) -> DiagnosticReport:
-    """FHIR R4 DiagnosticReport grouping a set of Observations for one visit."""
+    """
+    FHIR R4 DiagnosticReport grouping a set of Observations for one visit.
+
+    `code_system` allows a grouping report with no verified standard code to be
+    coded in the project-local CodeSystem instead of asserting a LOINC code that
+    does not exist.
+    """
     return DiagnosticReport(
         id=report_id,
         meta=Meta(profile=[PROFILE_DIAG_REPORT]),
@@ -363,7 +483,7 @@ def build_diagnostic_report(
                 coding=[_coding(SYS_V2_0074, "LAB", "Laboratory")]
             )
         ],
-        code=_codeable_concept(SYS_LOINC, loinc_code, loinc_display, title),
+        code=_codeable_concept(code_system, loinc_code, loinc_display, title),
         subject=_subject_ref(subject_id, base_url),
         effectiveDateTime=effective_date,
         issued=_now_iso(),
@@ -484,7 +604,73 @@ def observations_from_wide_row(
             obs_id=obs_id,
         ))
 
-    return observations
+    return _merge_blood_pressure(observations, subject_id, visit_date, base_url)
+
+
+# Blood pressure is modelled by FHIR as ONE Observation coded 85354-9 carrying
+# systolic and diastolic `component` slices — not as two independent
+# Observations. A wide table stores them in separate columns, so the naive
+# column-per-Observation transformation produces a structure the spec rejects.
+LOINC_BP_PANEL      = "85354-9"
+LOINC_BP_SYSTOLIC   = "8480-6"
+LOINC_BP_DIASTOLIC  = "8462-4"
+
+
+def _merge_blood_pressure(
+    observations: list[Observation], subject_id: str, visit_date: str, base_url: str
+) -> list[Observation]:
+    """
+    Replace separate systolic/diastolic Observations with one BP panel.
+
+    Returns the list unchanged unless BOTH components are present — a lone
+    systolic reading is left as-is rather than fabricating a partial panel.
+    """
+    def code_of(o: Observation) -> str:
+        try:
+            return str(o.code.coding[0].code)
+        except (AttributeError, IndexError, TypeError):
+            return ""
+
+    sys_obs = next((o for o in observations if code_of(o) == LOINC_BP_SYSTOLIC), None)
+    dia_obs = next((o for o in observations if code_of(o) == LOINC_BP_DIASTOLIC), None)
+    if sys_obs is None or dia_obs is None:
+        return observations
+
+    def qty(o: Observation):
+        q = getattr(o, "valueQuantity", None)
+        return (None, None) if q is None else (q.value, q.unit)
+
+    sys_val, sys_unit = qty(sys_obs)
+    dia_val, dia_unit = qty(dia_obs)
+    if sys_val is None or dia_val is None:
+        return observations
+
+    panel = build_observation(
+        subject_id=subject_id,
+        code=LOINC_BP_PANEL, code_system=SYS_LOINC,
+        display="Blood pressure panel with all children optional",
+        value=None, unit="",
+        # Derived from the source visit_date rather than read back off the
+        # model: fhir.resources coerces effectiveDateTime to a datetime, and
+        # str() on that yields "2025-03-15 00:00:00+00:00", which is not a valid
+        # FHIR dateTime.
+        effective_datetime=f"{visit_date}T00:00:00Z" if visit_date else None,
+        category_code="vital-signs",
+        components=[
+            {"system": SYS_LOINC, "code": LOINC_BP_SYSTOLIC,
+             "display": "Systolic blood pressure",
+             "value": sys_val, "unit": sys_unit or "mm[Hg]", "unit_code": "mm[Hg]"},
+            {"system": SYS_LOINC, "code": LOINC_BP_DIASTOLIC,
+             "display": "Diastolic blood pressure",
+             "value": dia_val, "unit": dia_unit or "mm[Hg]", "unit_code": "mm[Hg]"},
+        ],
+        base_url=base_url,
+        obs_id=f"obs-{subject_id}-blood-pressure-{visit_date}".replace("_", "-").replace(".", "-"),
+    )
+
+    kept = [o for o in observations if o is not sys_obs and o is not dia_obs]
+    kept.append(panel)
+    return kept
 
 
 def observations_from_timeseries_rows(
@@ -545,6 +731,7 @@ def observations_from_timeseries_rows(
             effective_datetime=timestamp,
             category_code=category_code,
             device_id=device_id,
+            additional_codings=_vital_sign_magic_coding(kind, mapping["code"]),
             base_url=base_url,
             obs_id=obs_id,
         )
@@ -605,6 +792,31 @@ def _ucum_for_unit(unit_label: str) -> str:
         "dimensionless":     "1",
     }
     return _map.get(unit_label, unit_label)
+
+
+# Wearable quantity_kinds that ARE a vital-signs concept, mapped to the LOINC
+# code the FHIR vital-signs profile requires for that concept. Driven by the
+# data's own quantity_kind (which the pipeline already knows) rather than by
+# guessing relationships between LOINC codes.
+_WEARABLE_MAGIC_CODE = {
+    "heart_rate":         ("8867-4", "Heart rate"),
+    "heart_rate_resting": ("8867-4", "Heart rate"),
+    "breathing_rate":     ("9279-1", "Respiratory rate"),
+}
+
+
+def _vital_sign_magic_coding(kind: str, assigned_code: str) -> list[tuple[str, str, str]]:
+    """
+    Extra coding needed so a vital-signs Observation satisfies its profile.
+
+    Returns the required magic coding when the mapper chose a different (often
+    more specific) code — e.g. 40443-4 "Heart rate --resting". Empty when the
+    assigned code already is the magic code, or the kind is not a vital sign.
+    """
+    magic = _WEARABLE_MAGIC_CODE.get(kind)
+    if not magic or str(assigned_code) == magic[0]:
+        return []
+    return [(SYS_LOINC, magic[0], magic[1])]
 
 
 def _wearable_category(kind: str, source: str) -> tuple[str, str]:
