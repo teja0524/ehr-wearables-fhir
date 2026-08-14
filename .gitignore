@@ -23,5 +23,14 @@ data/
 output/
 .chromadb/
 
+# Official HL7 FHIR validator jar (~150 MB) — downloaded, never committed
+*.jar
+tools/validator_cli.jar
+
 # Runtime-generated technician overrides (written by the dashboard)
 overrides/
+
+# Layer 3 evaluation: worksheets contain your annotations, not code.
+# Keep them out of git by default (they are research data, and the key file
+# must not leak into a repo where it could bias future annotation).
+evaluation/

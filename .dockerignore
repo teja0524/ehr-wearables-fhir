@@ -1,0 +1,43 @@
+# Virtual environments (venv alone is ~1.4 GB — must stay out of the build context)
+venv/
+env/
+.venv/
+
+# Version control & CI
+.git/
+.gitignore
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Secrets — the API key is injected at runtime via --env-file, never baked in
+.env
+
+# Generated artifacts (rebuilt inside the container / mounted as volumes)
+output/
+.chromadb/
+overrides/
+
+# OS cruft
+.DS_Store
+**/.DS_Store
+.Rhistory
+
+# The FHIR validator jar (~150 MB) is downloaded inside the image, not shipped
+# in the build context.
+*.jar
+tools/validator_cli.jar
+
+# Bulky study data — exclude everything under data/ EXCEPT the small terminology
+# seeds, which are needed to build the vector store on first run.
+data/*
+!data/terminology
+data/terminology/seed_candidates
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml

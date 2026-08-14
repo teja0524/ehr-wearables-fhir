@@ -93,6 +93,24 @@ REVIEW_COLUMNS = ["accept", "dataset", "cluster", "variable", "label", "vocab",
 # ---------------------------------------------------------------------------
 # UMLS REST client (thin; swap this one class for umls-python-client if desired)
 # ---------------------------------------------------------------------------
+def _is_usable_code(code: str) -> str | bool:
+    """
+    Reject identifiers that are not codeable concepts.
+
+    UMLS returns several identifier families for a LOINC search that cannot be
+    used as a FHIR Observation.code:
+        LA…    LOINC Answer code (an answer to a question, not an observation)
+        LP…    LOINC Part (a component fragment, not an orderable code)
+        MTHU…  Metathesaurus-internal identifier, not a LOINC code at all
+    Numeric-with-check-digit LOINC codes and numeric SNOMED/RxNorm identifiers
+    are kept.
+    """
+    c = code.strip().upper()
+    if c.startswith(("LA", "LP", "MTHU", "LG")):
+        return False
+    return bool(re.fullmatch(r"\d+(-\d)?", c))
+
+
 class UMLSClient:
     def __init__(self, api_key: str, sleep: float = 0.1):
         self.api_key = api_key
@@ -129,6 +147,13 @@ class UMLSClient:
             code = str(hit.get("ui", "")).strip()
             name = str(hit.get("name", "")).strip()
             if not code or code.upper() == "NONE":  # UMLS sentinel for no match
+                continue
+            # A UMLS search over sabs=LNC also returns LOINC Answer codes
+            # (LA…), LOINC Parts (LP…) and Metathesaurus-internal identifiers
+            # (MTHU…). None of these are valid Observation.code values, so they
+            # must not enter the seed — they look like codes but cannot be
+            # resolved by a terminology server.
+            if not _is_usable_code(code):
                 continue
             out.append({"code": code, "term": name})
             if len(out) >= top_n:

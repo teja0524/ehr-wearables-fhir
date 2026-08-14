@@ -1,0 +1,25 @@
+services:
+  dashboard:
+    build: .
+    image: fhir-pipeline
+    container_name: fhir-pipeline
+    ports:
+      - "8000:8000"
+    # API key(s) come from your local .env (never baked into the image).
+    env_file:
+      - .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+    volumes:
+      # Persist the built vector store so it isn't rebuilt on every start.
+      - ./.chromadb:/app/.chromadb
+      # Written bundles + mapping reports show up on the host.
+      - ./output:/app/output
+      # Sticky technician overrides from the dashboard.
+      - ./overrides:/app/overrides
+      # Your local study data (optional — the CLI reads from here; the dashboard
+      # can also just use uploads). Remove this line to rely only on the
+      # terminology seeds baked into the image.
+      - ./data:/app/data
+    restart: unless-stopped

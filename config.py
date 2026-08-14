@@ -11,7 +11,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 TERMINOLOGY_DIR = DATA_DIR / "terminology"
-SAMPLE_DIR = DATA_DIR / "sample"            # MFU/ComfortAge sample data
+SAMPLE_MFU_DIR = DATA_DIR / "sample_mfu"    # MFU/ComfortAge sample data
+SAMPLE_DIR = SAMPLE_MFU_DIR                 # backwards-compatible alias
 SAMPLE_ACE_DIR = DATA_DIR / "sample_ACE"    # ACE study data
 OUTPUT_DIR = BASE_DIR / "output"
 OVERRIDES_DIR = BASE_DIR / "overrides"  # technician code overrides (per dataset)
@@ -48,10 +49,53 @@ CHROMA_COLLECTION_RXNORM: str = "rxnorm_terms"
 # no.of candidates to retrieve per query before Claude re-ranks
 VECTOR_TOP_K: int = 5
 
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+# Validation 1 — conformance via the official HL7 validator (the reference
+# implementation). Falls back to the built-in structural checks when Java or the
+# jar is missing, so the pipeline still runs on a bare machine.
+#   Download: https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar
+USE_OFFICIAL_VALIDATOR: bool = os.getenv("USE_OFFICIAL_VALIDATOR", "true").lower() == "true"
+FHIR_VALIDATOR_JAR: Path = Path(
+    os.getenv("FHIR_VALIDATOR_JAR", str(BASE_DIR / "tools" / "validator_cli.jar"))
+)
+# Bundles validated per run (JVM cost is per-run, but large cohorts still add
+# up). 0 = validate every bundle. The conformance rate is reported over exactly
+# the bundles checked.
+VALIDATOR_MAX_BUNDLES: int = int(os.getenv("VALIDATOR_MAX_BUNDLES", "25"))
+VALIDATOR_TIMEOUT_SEC: int = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "900"))
+# Terminology is checked in Validation 2, so the validator's own tx lookups are off.
+VALIDATOR_DISABLE_TX: bool = True
+# Implementation Guide packages to validate against, in addition to base R4.
+# Profiles declared in meta.profile (e.g. vitalsigns) are always checked without
+# needing an entry here. For the European/EHDS context, add the HL7 Europe base
+# package below to produce a gap analysis against EU profiles:
+#   VALIDATOR_IG_PACKAGES = ["hl7.fhir.eu.base#2.0.0"]
+# Kept empty by default: resources are not yet built to satisfy the EU profiles,
+# so enabling it reports conformance gaps rather than passes.
+VALIDATOR_IG_PACKAGES: list[str] = [
+    ig for ig in os.getenv("VALIDATOR_IG_PACKAGES", "").split(",") if ig.strip()
+]
+
+# Validation 2 — terminology validation ($validate-code on a terminology server).
+CHECK_TERMINOLOGY: bool = os.getenv("CHECK_TERMINOLOGY", "true").lower() == "true"
+TX_SERVER_URL: str = os.getenv("TX_SERVER_URL", "https://tx.fhir.org/r4")
+TX_TIMEOUT_SEC: int = int(os.getenv("TX_TIMEOUT_SEC", "15"))
+
 # FHIR
 FHIR_VERSION: str = "4.0.1"
-# Base URL used in FHIR resource identifiers (can be changed to actual while deploying)
-FHIR_BASE_URL: str = "http://comfortage.example.org/fhir"
+# Namespace URI for identifiers, references and the local CodeSystem.
+#
+# This is an IDENTIFIER, not a link — nothing dereferences it (the same way
+# "http://loinc.org" names LOINC without serving anything). It only has to be
+# globally unique and owned by the project, so a path under the study's real
+# domain is the conventional choice.
+#
+# It must NOT be example.org/example.com: the official HL7 validator rejects
+# reserved example domains ("Example URLs are not allowed in this context")
+# precisely because anyone could claim them, so they identify nothing.
+FHIR_BASE_URL: str = os.getenv("FHIR_BASE_URL", "https://comfortage.eu/fhir")
 
 # Code system URIs.
 # The standard-vocabulary URIs (LOINC/SNOMED/RxNorm/NCBI taxonomy) live in
@@ -356,14 +400,14 @@ ACE_CLUSTER_REGISTRY = {
 DATASETS = {
     "mfu": {
         "name": "mfu",
-        "data_dir": SAMPLE_DIR,
+        "data_dir": SAMPLE_MFU_DIR,
         "delimiter": ",",
         "dict_format": "mfu_csv",   # per-cluster dictionary CSVs
         "dict_file": None,
         "id_col": "subject_id",
         "clusters": CLUSTER_REGISTRY,
         "all_clusters": ALL_DATA_CLUSTERS,
-        "output_subdir": "",        # MFU bundles stay at output/ root
+        "output_subdir": "mfu",     # MFU bundles → output/mfu/
     },
     "ace": {
         "name": "ace",

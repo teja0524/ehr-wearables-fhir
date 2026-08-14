@@ -21,7 +21,7 @@ fhir_mvp/
 ├── main.py                        # Entry point (--dataset selects the study)
 ├── config.py                      # Paths, model settings, DATASETS + cluster registries
 ├── data/
-│   ├── sample/                    # MFU/ComfortAge source CSVs (comma-delimited)
+│   ├── sample_mfu/                # MFU/ComfortAge source CSVs (comma-delimited)
 │   ├── sample_ACE/                # ACE study CSVs (semicolon-delimited) + Excel dictionary
 │   └── terminology/               # LOINC, SNOMED, RxNorm seed CSVs
 ├── src/
@@ -38,6 +38,8 @@ fhir_mvp/
 │   └── vector_store/
 │       └── store.py               # ChromaDB terminology store
 └── output/                        # Generated FHIR bundles (git-ignored)
+    ├── mfu/                       # MFU bundles + mapping_report.json
+    └── ace/                       # ACE bundles + mapping_report.json
 ```
 
 ---
@@ -51,12 +53,60 @@ agent nodes process any of them. Two dataset types:
 
 | Dataset | Data dir | Delimiter | ID column | Dictionary | Output |
 |---|---|---|---|---|---|
-| `mfu` (default) | `data/sample/` | `,` | `subject_id` | per-cluster CSVs | `output/` |
+| `mfu` (default) | `data/sample_mfu/` | `,` | `subject_id` | per-cluster CSVs | `output/mfu/` |
 | `ace` | `data/sample_ACE/` | `;` | `faceid` | one Excel workbook | `output/ace/` |
 
 
 Add a new study by adding one entry to `DATASETS` (and a cluster registry); no
 agent code changes are required for standard wide/long tables.
+
+---
+
+## Getting started (fresh clone)
+
+The repository contains **code only**. Study data and terminology seeds are
+excluded by `.gitignore`, so a clone cannot run the pipeline until you supply
+them. What you need, and where to get it:
+
+| Prerequisite | In the repo? | How to obtain |
+|---|---|---|
+| Python deps | via `requirements.txt` | `pip install -r requirements.txt` |
+| `.env` with API key | no | `cp .env.example .env`, then edit |
+| **Terminology seeds** (`data/terminology/*_seed.csv`) | **no** | Regenerate from UMLS (below), or request from the author |
+| **Study data** (`data/sample_mfu/`, `data/sample_ACE/`) | **no** | Supplied separately — contains study data |
+| FHIR validator jar | no | One `curl` (below); optional, pipeline degrades gracefully |
+
+Terminology seeds are excluded deliberately: SNOMED CT redistribution requires
+an affiliate licence, so each user should obtain terminology content under their
+own licence rather than receiving a copy.
+
+```bash
+# 1. environment
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. configuration
+cp .env.example .env          # then edit: ANTHROPIC_API_KEY (required)
+
+# 3. FHIR validator for conformance checking (optional but recommended)
+mkdir -p tools && curl -sSL -o tools/validator_cli.jar \
+  https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar
+
+# 4. terminology seeds — either place the CSVs in data/terminology/,
+#    or regenerate them from UMLS (needs a free UTS account + UMLS_API_KEY):
+python main.py --enrich-seed          # fetch candidates for review
+#    review data/terminology/seed_candidates/umls_seed_candidates.csv (set accept=Y)
+python main.py --apply-seed           # merge accepted rows into the seeds
+
+# 5. place study data under data/sample_mfu/ and/or data/sample_ACE/
+#    (see Project Structure and the Datasets table for the expected layout)
+
+# 6. run
+python main.py --rebuild-store --dataset mfu --clusters all --max-subjects 20
+```
+
+Alternatively use Docker (Java and the validator jar are pre-installed) — see
+the Docker section. Data and seeds are still required.
 
 ---
 
@@ -78,6 +128,27 @@ venv\Scripts\activate           # Windows
 pip install -r requirements.txt
 ```
 
+### Configuration
+
+`.env` holds credentials (`ANTHROPIC_API_KEY`, optional `UMLS_API_KEY` and other
+provider keys). Behaviour is configured in `config.py`, and every setting below
+can be overridden by an environment variable of the same name:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Model used by the code mapper |
+| `FHIR_BASE_URL` | `https://comfortage.eu/fhir` | Identifier namespace for generated resources |
+| `PORT` / `HOST` | `8000` / `127.0.0.1` | Dashboard server bind address |
+
+Validation settings (`USE_OFFICIAL_VALIDATOR`, `VALIDATOR_MAX_BUNDLES`,
+`TX_SERVER_URL`, …) are documented in the [Validation](#validation) section.
+
+> **`FHIR_BASE_URL` is an identifier, not a link.** Nothing dereferences it — in
+> the same way `http://loinc.org` names LOINC without serving anything. It must
+> be globally unique and owned by your project, and must **not** be an
+> `example.org`/`example.com` address: the official HL7 validator rejects
+> reserved example domains, since anyone could claim them.
+
 **4. Copy .env.example and set up your Anthropic API key:**
 ```bash
 cp .env.example .env
@@ -86,6 +157,51 @@ Open `.env` and replace the placeholder with your key:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+---
+
+## Docker
+
+The project ships with a `Dockerfile` and `docker-compose.yml`. The image bundles
+the small terminology seeds (`data/terminology/`) so the vector store builds on
+first run; the bulky sample datasets and your API key are **not** baked in.
+
+**1. Set your API key** (compose reads it from `.env`):
+```bash
+cp .env.example .env      # then edit ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**2. Build and start the dashboard:**
+```bash
+docker compose up --build   # dashboard → http://127.0.0.1:8000
+```
+The container binds to `0.0.0.0` internally (via `HOST`) and publishes port 8000
+to your machine. `.chromadb/`, `output/`, `overrides/`, and `data/` are mounted
+as volumes, so the built vector store and generated bundles persist on the host.
+
+**Run the CLI instead of the dashboard** (override the default command):
+```bash
+docker compose run --rm dashboard python main.py --dataset ace --clusters all --max-subjects 25
+```
+
+**Plain `docker` (without compose):**
+```bash
+docker build -t fhir-pipeline .
+docker run --rm -p 8000:8000 --env-file .env \
+  -v "$PWD/.chromadb:/app/.chromadb" -v "$PWD/output:/app/output" \
+  fhir-pipeline
+```
+
+> **Note on data:** study data and terminology seeds are git-ignored, so a fresh
+> clone won't contain them. The Docker build copies whatever is in your local
+> `data/terminology/` at build time. If those seed CSVs are missing, regenerate
+> them with the UMLS seed builder (see `tools/README_umls_seed.md`) before
+> building.
+>
+> On **Linux hosts**, bind-mounted volumes are written as the container's
+> `appuser` (uid 1000); if you hit permission errors on `output/` or `.chromadb/`,
+> either `chown` those dirs to uid 1000 or switch them to named volumes. On
+> macOS/Windows (Docker Desktop) this is handled automatically.
 
 ---
 
@@ -194,6 +310,69 @@ that provider's key in your `.env`:
 
 Model ids for non-Anthropic providers follow LiteLLM's naming and may need
 updating as providers release new versions (edit `MODEL_CHOICES` in `config.py`).
+
+---
+
+## Validation
+
+Quality is assessed at three levels, which answer different questions and are
+not substitutes for one another. The first two are **validation** — automated
+checks against an external specification, run as Node 4 on every pipeline run.
+The third is **evaluation** — an offline research study measuring how well the
+mapping performs, which requires human judgement and therefore cannot run
+inside the pipeline.
+
+| | Question | How | Where |
+|---|---|---|---|
+| **Validation 1** — Conformance | Is this legal FHIR R4? | Official HL7 `validator_cli.jar` + profiles declared in `meta.profile` | `src/validation/conformance.py` (automated) |
+| **Validation 2** — Terminology | Do these codes exist? | `$validate-code` against a terminology server | `src/validation/terminology.py` (automated) |
+| **Evaluation** — Semantic accuracy | Is this the *right* code for the variable? | Comparison against a reference standard | `tools/evaluate_mapping.py` (offline study) |
+
+The distinction matters: a resource can be perfectly conformant (Validation 1)
+and carry a real code (Validation 2) that is nonetheless the wrong concept for
+the variable. Only the evaluation can detect that.
+
+Validation results are written into `mapping_report.json` under `conformance`
+and `terminology`, so conformance rate and code-resolution rate can be reported
+directly. Evaluation results are written separately to
+`evaluation/evaluation_results.json`.
+
+**Validation 1 — conformance.** Uses the HL7 reference implementation rather than
+hand-written checks, so the conformance rate is authoritative. Profiles a
+resource declares in `meta.profile` (e.g. `vitalsigns`) are verified
+automatically. Requires Java 11+ and the validator jar:
+
+```bash
+mkdir -p tools && curl -sSL -o tools/validator_cli.jar \
+  https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar
+```
+
+If Java or the jar is missing, the node logs a warning and falls back to the
+built-in structural checks — the pipeline never hard-fails, and the report
+records which validator produced the result. In Docker both are pre-installed.
+
+To validate against **HL7 Europe base** profiles (EHDS context) as a gap
+analysis, set:
+```bash
+VALIDATOR_IG_PACKAGES=hl7.fhir.eu.base#2.0.0
+```
+
+**Validation 2 — terminology.** Every distinct code is checked once against
+`tx.fhir.org` and cached in `output/terminology_cache.json`. Project-local codes
+are reported separately and excluded from the resolution rate (no server can
+know them). If the server is unreachable, codes are marked `unchecked` — never
+`invalid` — so network failures cannot understate coverage.
+
+**Relevant settings** (all overridable via `.env`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `USE_OFFICIAL_VALIDATOR` | `true` | Use the HL7 validator for Validation 1 |
+| `FHIR_VALIDATOR_JAR` | `tools/validator_cli.jar` | Path to the jar |
+| `VALIDATOR_MAX_BUNDLES` | `25` | Bundles validated per run (`0` = all) |
+| `VALIDATOR_IG_PACKAGES` | *(empty)* | Extra IG packages, comma-separated |
+| `CHECK_TERMINOLOGY` | `true` | Enable Validation 2 |
+| `TX_SERVER_URL` | `https://tx.fhir.org/r4` | Terminology server |
 
 ---
 

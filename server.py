@@ -89,6 +89,26 @@ def _save_uploads(files) -> Path:
     return tmp
 
 
+def _resolve_data_root(upload_dir: Path) -> Path:
+    """
+    Find the directory the cluster paths are relative to.
+
+    A browser folder upload puts the selected folder's own name at the front of
+    every file's relative path (`sample_mfu/blood/blood_labs.csv`), so the files
+    land one level deeper than the dataset config expects
+    (`<data_dir>/blood/blood_labs.csv`). Descend through any single-directory
+    wrappers so both a folder upload and a flat multi-file selection resolve to
+    the same root.
+    """
+    entries = [p for p in upload_dir.iterdir() if not p.name.startswith(".")]
+    # Exactly one wrapper level is added by the browser, so descend at most one.
+    # Descending greedily would walk into a cluster directory whenever a dataset
+    # happens to have a single cluster, which is worse than not descending.
+    if len(entries) == 1 and entries[0].is_dir():
+        return entries[0]
+    return upload_dir
+
+
 def _dataset_config(name: str, data_dir: Path) -> dict:
     """Clone a dataset template from config and point it at the uploaded dir."""
     base = dict(cfg.DATASETS[name])
@@ -121,7 +141,8 @@ def run():
     if choice and not os.getenv(choice["key"], "") and not (choice["key"] == "ANTHROPIC_API_KEY" and cfg.ANTHROPIC_API_KEY):
         return jsonify({"error": f"{choice['provider']} model selected but {choice['key']} is not set in your environment/.env."}), 400
 
-    upload_dir = _save_uploads(files)
+    upload_dir = _resolve_data_root(_save_uploads(files))
+    log.info("Upload root resolved to %s", upload_dir)
     dataset_name = _detect_dataset(upload_dir) if ds_choice == "auto" else ds_choice
     resp, code = _execute(upload_dir, dataset_name, model, mode, max_subjects, skip_mapping, apply_overrides)
     if code == 200:
@@ -164,6 +185,13 @@ def _execute(upload_dir: Path, dataset_name: str, model: str, mode: str,
         if mode == "full":
             state = build_fhir(state, cfg)
             state = validate_fhir(state, cfg)
+        else:
+            # Mapping-only: no resources exist, so FHIR conformance (Validation 1)
+            # cannot run — but terminology validation (Validation 2) only needs the
+            # codes, so it still applies.
+            from src.validation import terminology
+            _, term_summary = terminology.check_mappings(state.get("mapping_index", {}), cfg)
+            state["terminology_summary"] = term_summary
         state = export_output(state, cfg)
 
         subdir = dataset.get("output_subdir", "")
@@ -231,5 +259,8 @@ def rebuild_endpoint():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
-    print(f"\n  FHIR pipeline dashboard → http://127.0.0.1:{port}\n")
-    app.run(host="127.0.0.1", port=port, debug=False)
+    # Bind to 127.0.0.1 for local dev; containers set HOST=0.0.0.0 so the port
+    # is reachable from the host via the published mapping.
+    host = os.getenv("HOST", "127.0.0.1")
+    print(f"\n  FHIR pipeline dashboard → http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}\n")
+    app.run(host=host, port=port, debug=False)

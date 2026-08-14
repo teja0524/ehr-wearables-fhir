@@ -1,11 +1,34 @@
 """
 Node 4 — Validator
 
-Lightweight structural validation of the generated FHIR R4 resources.
-Limited to checking required fields, code system URIs, and resource 
-completeness without requiring an actual FHIR server.
+Runs the pipeline's two automated validation checks over the generated
+resources. Both are VERIFICATION in the engineering sense — they compare the
+artifact against an external specification, are objective and repeatable, and
+require no human judgement:
 
-For full profile validation, hapi-fhir-cli can be utilised later.
+  Validation 1 — Conformance (src/validation/conformance.py)
+      The official HL7 `validator_cli.jar` checks each Bundle against the FHIR
+      R4 specification and any profile declared in `meta.profile`. This is the
+      reference implementation, so the resulting conformance rate is
+      authoritative rather than a self-defined subset of rules.
+      If Java or the jar is unavailable the node falls back to the built-in
+      structural checks below, and records which path was taken.
+
+  Validation 2 — Terminology (src/validation/terminology.py)
+      Confirms every emitted code actually exists in its code system via
+      `$validate-code` on a terminology server.
+
+The built-in `_validate_resource` checks are retained as the offline fallback
+for Validation 1: they are fast and dependency-free, but they only cover required
+fields, a status enum, and a code-system allow-list — they are NOT a substitute
+for spec conformance, and results say which validator produced them.
+
+Neither check can judge whether a code is the *correct* one for a given
+variable. That is semantic accuracy, and it is not verifiable against any
+specification — it requires human judgement against a reference standard. It is
+therefore handled outside the pipeline as an offline EVALUATION study
+(`tools/build_annotation_set.py`, `tools/evaluate_mapping.py`) rather than as a
+third check here.
 """
 
 from __future__ import annotations
@@ -14,6 +37,7 @@ import logging
 from typing import Any
 
 from src.state import PipelineState, ValidationIssue
+from src.validation import conformance, terminology
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +71,10 @@ VALID_CODE_SYSTEMS = {
     "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
     "http://terminology.hl7.org/CodeSystem/data-absent-reason",
     "http://unitsofmeasure.org",
-    "http://comfortage.example.org/fhir/CodeSystem/comfortage-local",
 }
+# The project-local CodeSystem URI is derived from FHIR_BASE_URL, so it is added
+# at call time rather than hardcoded here (a literal would go stale the moment
+# the base URL changes, and silently flag every local code as unrecognised).
 
 VALID_OBS_STATUSES = {"registered", "preliminary", "final", "amended",
                       "corrected", "cancelled", "entered-in-error", "unknown"}
@@ -57,7 +83,9 @@ VALID_OBS_STATUSES = {"registered", "preliminary", "final", "amended",
 def validate_fhir(state: PipelineState, cfg: Any) -> PipelineState:
     """
     LangGraph node: validate all generated FHIR resources.
-    Populates state["validation_issues"] with errors and warnings.
+
+    Populates state["validation_issues"], plus state["conformance_summary"] and
+    state["terminology_summary"] with the quantitative results of each layer.
     """
     issues: list[ValidationIssue] = []
     resources = state.get("fhir_resources", [])
@@ -73,11 +101,49 @@ def validate_fhir(state: PipelineState, cfg: Any) -> PipelineState:
 
     logger.info("Validator: checking %d resources", len(resources))
 
-    for resource in resources:
-        resource_type = resource.get("resourceType", "Unknown")
-        resource_id = resource.get("id", "unknown-id")
-        resource_issues = _validate_resource(resource, resource_type, resource_id)
-        issues.extend(resource_issues)
+    # --- Validation 1: conformance -------------------------------------------------
+    # The official validator is preferred, but it must be treated as failed
+    # unless it actually returns a verdict. A run that could not execute has NOT
+    # demonstrated conformance, so we fall back rather than report zero issues —
+    # otherwise a missing Java runtime silently looks like a perfect result.
+    available, reason = conformance.validator_available(cfg)
+    conf_summary: dict = {}
+    conf_issues: list[dict] = []
+    if available:
+        conf_issues, conf_summary = conformance.validate_bundles(
+            state.get("fhir_bundles", {}), cfg
+        )
+        if not conf_summary.get("ok", False):
+            reason = conf_summary.get("note", "validator did not return a verdict")
+            available = False
+
+    if available:
+        issues.extend(ValidationIssue(**i) for i in conf_issues)
+    else:
+        logger.warning("Validator: official FHIR validator unavailable (%s) — "
+                       "falling back to built-in structural checks", reason)
+        for resource in resources:
+            resource_type = resource.get("resourceType", "Unknown")
+            resource_id = resource.get("id", "unknown-id")
+            issues.extend(_validate_resource(resource, resource_type, resource_id,
+                                             str(getattr(cfg, 'SYSTEM_LOCAL', ''))))
+        conf_summary = {
+            "ok": False,
+            "validator": "built-in structural checks (fallback)",
+            "resources_checked": len(resources),
+            "conformance_rate_pct": None,
+            "note": f"official validator not used: {reason}",
+        }
+    state["conformance_summary"] = conf_summary
+
+    # --- Validation 2: terminology -------------------------------------------------
+    try:
+        term_issues, term_summary = terminology.check_resources(resources, cfg)
+        issues.extend(ValidationIssue(**i) for i in term_issues)
+    except Exception as exc:                    # noqa: BLE001 - never fail the run on a network hiccup
+        logger.warning("Validator: terminology check failed: %s", exc)
+        term_summary = {"note": f"terminology check failed: {exc}"}
+    state["terminology_summary"] = term_summary
 
     errors = [i for i in issues if i["severity"] == "error"]
     warnings = [i for i in issues if i["severity"] == "warning"]
@@ -101,7 +167,7 @@ def validate_fhir(state: PipelineState, cfg: Any) -> PipelineState:
 
 
 def _validate_resource(
-    resource: dict, resource_type: str, resource_id: str
+    resource: dict, resource_type: str, resource_id: str, local_system: str = ""
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
@@ -124,7 +190,7 @@ def _validate_resource(
         issues.extend(_validate_bundle(resource, resource_id))
 
     # 4. Code system validity
-    issues.extend(_check_code_systems(resource, resource_id))
+    issues.extend(_check_code_systems(resource, resource_id, local_system))
 
     return issues
 
@@ -212,18 +278,20 @@ def _validate_bundle(resource: dict, resource_id: str) -> list[ValidationIssue]:
     return issues
 
 
-def _check_code_systems(resource: dict, resource_id: str) -> list[ValidationIssue]:
+def _check_code_systems(resource: dict, resource_id: str,
+                        local_system: str = "") -> list[ValidationIssue]:
     """Recursively find all coding.system values and warn on unknowns."""
     issues: list[ValidationIssue] = []
-    _walk_for_systems(resource, resource_id, issues)
+    known = VALID_CODE_SYSTEMS | ({local_system} if local_system else set())
+    _walk_for_systems(resource, resource_id, issues, known)
     return issues
 
 
-def _walk_for_systems(obj: Any, resource_id: str, issues: list) -> None:
+def _walk_for_systems(obj: Any, resource_id: str, issues: list, known: set) -> None:
     if isinstance(obj, dict):
         if "system" in obj and "code" in obj:
             system = obj["system"]
-            if system and system not in VALID_CODE_SYSTEMS:
+            if system and system not in known:
                 # Only warn for unexpected systems (not errors — could be custom)
                 issues.append(ValidationIssue(
                     resource_id=resource_id,
@@ -231,7 +299,7 @@ def _walk_for_systems(obj: Any, resource_id: str, issues: list) -> None:
                     message=f"Unrecognised code system '{system}' — verify it is intentional",
                 ))
         for v in obj.values():
-            _walk_for_systems(v, resource_id, issues)
+            _walk_for_systems(v, resource_id, issues, known)
     elif isinstance(obj, list):
         for item in obj:
-            _walk_for_systems(item, resource_id, issues)
+            _walk_for_systems(item, resource_id, issues, known)

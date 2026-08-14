@@ -393,14 +393,19 @@ def build_bundle(
             )
         )
 
-    return Bundle(
-        id=make_resource_id("bundle-"),
-        meta=Meta(lastUpdated=_now_iso()),
-        type=bundle_type,
-        timestamp=_now_iso(),
-        total=len(entries),
-        entry=entries,
-    )
+    data: dict[str, Any] = {
+        "id": make_resource_id("bundle-"),
+        "meta": Meta(lastUpdated=_now_iso()),
+        "type": bundle_type,
+        "timestamp": _now_iso(),
+        "entry": entries,
+    }
+    # FHIR invariant bdl-1: Bundle.total is only permitted on searchset and
+    # history Bundles. Setting it on a 'collection' Bundle is a conformance
+    # error, so it is omitted unless the type allows it.
+    if bundle_type in ("searchset", "history"):
+        data["total"] = len(entries)
+    return Bundle(**data)
 
 
 # Observation batch builders

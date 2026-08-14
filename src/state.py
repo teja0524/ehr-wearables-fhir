@@ -65,6 +65,8 @@ class PipelineState(TypedDict):
     fhir_resources: list[dict[str, Any]]    # serialised FHIR resource dicts
     fhir_bundles: dict[str, dict]           # subject_id → Bundle JSON
     validation_issues: list[ValidationIssue]
+    conformance_summary: dict[str, Any]     # Validation 1 — FHIR spec conformance
+    terminology_summary: dict[str, Any]     # Validation 2 — code existence/resolution
     output_paths: list[str]                 # paths of written JSON files
     errors: list[str]
     warnings: list[str]

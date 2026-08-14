@@ -90,6 +90,8 @@ def initial_state(
         fhir_resources=[],
         fhir_bundles={},
         validation_issues=[],
+        conformance_summary={},
+        terminology_summary={},
         output_paths=[],
         errors=[],
         warnings=[],
@@ -150,6 +152,12 @@ def export_output(state: PipelineState, cfg: Any) -> PipelineState:
             }
             for m in state.get("code_mappings", [])
         ],
+        # Automated validation results, reported per layer so each can be cited
+        # independently: conformance = "is it legal FHIR?", terminology =
+        # "do these codes exist?". Semantic correctness of a mapping is NOT
+        # measurable here and is evaluated against a reference standard.
+        "conformance": state.get("conformance_summary", {}),
+        "terminology": state.get("terminology_summary", {}),
         "validation": {
             "errors": [
                 {"resource": v["resource_id"], "message": v["message"]}

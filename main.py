@@ -204,8 +204,14 @@ def main() -> int:
 
         console.print("\n[bold]Mapping-only mode:[/bold] schema parse + code mapping (no bundles)\n")
         t1 = time.time()
+        from src.validation import terminology
+
         state = parse_schema(state, cfg)
         state = map_codes(state, cfg, store)
+        # No resources are built here, so FHIR conformance (Validation 1) cannot run,
+        # but terminology validation (Validation 2) only needs the codes themselves.
+        _, term_summary = terminology.check_mappings(state.get("mapping_index", {}), cfg)
+        state["terminology_summary"] = term_summary
         # export_output writes only mapping_report.json when there are no bundles.
         state = export_output(state, cfg)
         elapsed = time.time() - t1
