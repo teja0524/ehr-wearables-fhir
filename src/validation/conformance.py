@@ -20,6 +20,7 @@ results cleanly separated.
 
 Requires: Java 11+ on PATH and validator_cli.jar. When either is missing the
 caller falls back to the built-in structural checks; nothing hard-fails.
+h
 """
 
 from __future__ import annotations
