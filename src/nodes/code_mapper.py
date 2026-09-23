@@ -114,6 +114,23 @@ def _vocabs_for(cluster: str, cfg: Any, registry: dict) -> list[str]:
 def _map_single_variable(var_meta, model, store, cfg, registry) -> CodeMapping:
     """Pool candidates from the cluster's vocabularies, then let the LLM pick the best."""
     vocabs = _vocabs_for(var_meta["cluster"], cfg, registry)
+
+    # Retrieval ablation (config.NO_RAG). No shortlist is built and the store is
+    # never queried; the model must recall a code unaided. Returns early so the
+    # retrieval path below is untouched when the flag is off.
+    if getattr(cfg, "NO_RAG", False):
+        selected = _llm_recall_code(var_meta, vocabs, model, cfg)
+        system_uri = _VOCAB.get(selected.get("vocab", ""), {}).get("system", LOINC_SYSTEM)
+        return CodeMapping(
+            variable=var_meta["variable"], cluster=var_meta["cluster"],
+            code_system=system_uri, code=selected["code"], display=selected["display"],
+            confidence=selected["confidence"], rationale=selected["rationale"],
+            # Empty by construction. Downstream consumers already handle a
+            # variable with no candidates (it is the UNMAPPED case), and the
+            # empty list is itself the record that this run had no retrieval.
+            candidates=[], ucum_unit="",
+        )
+
     query = _build_search_query(var_meta)
 
     candidates: list[dict] = []
@@ -225,3 +242,77 @@ Respond ONLY with valid JSON:
         top = candidates[0]
         return {"code": top["code"], "display": top["term"],
                 "confidence": "low", "rationale": "Fallback to closest vector result (LLM parse failed)."}
+
+
+def _llm_recall_code(var_meta, vocabs, model, cfg) -> dict:
+    """Ask the LLM for a code from its own knowledge, with no candidates supplied.
+
+    Used only by the NO_RAG ablation. The variable block, the option to decline,
+    the confidence vocabulary and the response schema are deliberately identical
+    to `_llm_select_best_code`, so that the presence or absence of the retrieved
+    shortlist is the only difference between the two conditions.
+
+    Returned codes are NOT checked here. Whether the model invents a plausible
+    but non-existent identifier is the measurement, so the output is passed
+    through unaltered and left to the terminology validation layer to judge.
+    """
+    allowed = ", ".join(_VOCAB[v]["label"] for v in vocabs if v in _VOCAB) or "LOINC"
+
+    prompt = f"""You are a clinical terminologist mapping study variables to standard
+codes (LOINC / SNOMED CT / RxNorm) for FHIR R4 interoperability.
+
+VARIABLE TO MAP
+  Name       : {var_meta['variable']}
+  Label      : {var_meta['label']}
+  Units      : {var_meta['units']}
+  Type       : {var_meta['var_type']}
+  Value range: {var_meta['min_val']} – {var_meta['max_val']}
+  Notes      : {var_meta['notes'][:300]}
+  Cluster    : {var_meta['cluster']}
+
+No candidate list is provided. Recall the single best code from your own
+knowledge of these terminologies. Permitted terminologies for this variable:
+{allowed}.
+
+Give the code exactly as it appears in the source terminology. If you cannot
+recall a specific code for this variable with reasonable certainty, return
+"UNMAPPED" (the value will fall back to a local code) — do not guess.
+
+Respond ONLY with valid JSON:
+{{
+  "code": "<code string or UNMAPPED>",
+  "vocab": "<loinc|snomed|rxnorm>",
+  "display": "<preferred display name>",
+  "confidence": "high|medium|low",
+  "rationale": "<one sentence>"
+}}"""
+
+    raw = llm.complete(prompt, model=model, max_tokens=400,
+                       anthropic_api_key=cfg.ANTHROPIC_API_KEY).strip()
+    if "```" in raw:
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
+
+    try:
+        result = json.loads(raw)
+        assert "code" in result and "display" in result
+        result.setdefault("confidence", "low")
+        result.setdefault("rationale", "")
+        if not result.get("display"):
+            result["display"] = var_meta["label"]
+        if not result.get("code"):
+            result["code"] = "UNMAPPED"
+        # Constrain the system to one this cluster is allowed to use, so a
+        # recalled code is never filed under a terminology the RAG arm could
+        # not have chosen either.
+        vocab = str(result.get("vocab", "")).strip().lower()
+        result["vocab"] = vocab if vocab in vocabs else (vocabs[0] if vocabs else "loinc")
+        return result
+    except (json.JSONDecodeError, AssertionError, KeyError):
+        # No shortlist exists to fall back to, so a parse failure is UNMAPPED.
+        logger.warning("LLM returned non-JSON for %s: %s", var_meta["variable"], raw[:200])
+        return {"code": "UNMAPPED", "vocab": vocabs[0] if vocabs else "loinc",
+                "display": var_meta["label"], "confidence": "low",
+                "rationale": "LLM parse failed and no retrieval fallback exists."}

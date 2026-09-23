@@ -165,10 +165,10 @@ def _execute(upload_dir: Path, dataset_name: str, model: str, mode: str,
     root.setLevel(logging.INFO)
     try:
         from src.graph import initial_state, export_output
-        from src.agents.schema_parser import parse_schema
-        from src.agents.code_mapper import map_codes
-        from src.agents.fhir_builder import build_fhir
-        from src.agents.validator import validate_fhir
+        from src.nodes.schema_parser import parse_schema
+        from src.nodes.code_mapper import map_codes
+        from src.nodes.fhir_builder import build_fhir
+        from src.nodes.validator import validate_fhir
 
         store = _get_store()
         state = initial_state(

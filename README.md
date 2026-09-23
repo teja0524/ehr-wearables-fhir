@@ -28,7 +28,7 @@ fhir_mvp/
 │   ├── graph.py                   # LangGraph pipeline definition
 │   ├── state.py                   # Shared pipeline state (carries the active dataset)
 │   ├── dictionary.py              # Unified dictionary loader (MFU CSV + ACE xlsx)
-│   ├── agents/
+│   ├── nodes/
 │   │   ├── schema_parser.py       # Node 1
 │   │   ├── code_mapper.py         # Node 2 (with on-disk mapping cache)
 │   │   ├── fhir_builder.py        # Node 3 (MFU + ACE strategies)
@@ -49,7 +49,7 @@ fhir_mvp/
 The pipeline is dataset-driven. A single `DATASETS` registry in `config.py`
 describes each study i.e. its data directory, CSV delimiter, subject-ID column,
 dictionary format, cluster registry, and output sub-folder. Then the same four
-agent nodes process any of them. Two dataset types:
+processing nodes handle any of them. Two dataset types:
 
 | Dataset | Data dir | Delimiter | ID column | Dictionary | Output |
 |---|---|---|---|---|---|
@@ -58,7 +58,35 @@ agent nodes process any of them. Two dataset types:
 
 
 Add a new study by adding one entry to `DATASETS` (and a cluster registry); no
-agent code changes are required for standard wide/long tables.
+node code changes are required for standard wide/long tables.
+
+### Data provenance and access
+
+**No study data is included in this repository, and none should ever be added to
+it.** Both datasets are contributed by pilot studies of the COMFORTage Horizon
+Europe project and are restricted-access: MFU comes from Pilot 7 (Faculty of
+Medicine, University of Ljubljana), ACE from Pilot 3 (Ace Alzheimer Center
+Barcelona). They contain pseudonymised participant records, including clinical,
+genetic and biomarker measurements. Obtaining them requires authorisation from
+the contributing pilot; they cannot be redistributed here or elsewhere.
+
+`.gitignore` and `.dockerignore` exclude `data/`, generated bundles (`output/`,
+`runs/`, `_archive/`), the vector store (`.chromadb/`), the correction files
+(`overrides/`) and the evaluation worksheets (`evaluation/`). If you add a new
+data directory or output location, add it to both files before your first commit.
+
+The pipeline itself sends no subject-level data to any external service. The
+code mapper receives only variable-level metadata — column name, label, declared
+type, units and cluster — plus, for the two long-format clusters, the set of
+distinct metric names and each numeric metric's cohort-level minimum and
+maximum. Individual measurements are read only during local resource
+construction. The terminology server (Validation 2) receives codes only, never
+values.
+
+Terminology seeds are also excluded, for licensing rather than privacy reasons:
+LOINC and SNOMED CT content carries its own terms of use, and SNOMED CT requires
+an affiliate licence in most territories. Supply the seeds yourself or
+regenerate them from UMLS with `--enrich-seed` (see step 4 below).
 
 ---
 
@@ -100,6 +128,8 @@ python main.py --apply-seed           # merge accepted rows into the seeds
 
 # 5. place study data under data/sample_mfu/ and/or data/sample_ACE/
 #    (see Project Structure and the Datasets table for the expected layout)
+#    NOTE: study data is restricted-access and is NOT shipped with this repo —
+#    see "Data provenance and access" above.
 
 # 6. run
 python main.py --rebuild-store --dataset mfu --clusters all --max-subjects 20
@@ -139,9 +169,21 @@ can be overridden by an environment variable of the same name:
 | `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Model used by the code mapper |
 | `FHIR_BASE_URL` | `https://comfortage.eu/fhir` | Identifier namespace for generated resources |
 | `PORT` / `HOST` | `8000` / `127.0.0.1` | Dashboard server bind address |
+| `VECTOR_TOP_K` | `5` | Candidates retrieved per query before the model re-ranks |
+| `NO_RAG` | `0` | Retrieval ablation — see below. `1` disables vector search entirely |
 
 Validation settings (`USE_OFFICIAL_VALIDATOR`, `VALIDATOR_MAX_BUNDLES`,
-`TX_SERVER_URL`, …) are documented in the [Validation](#validation) section.
+`TX_SERVER_URL`, `VALIDATOR_TIMEOUT_SEC`, `TX_TIMEOUT_SEC`, …) are documented in
+the [Validation](#validation) section.
+
+> **`NO_RAG=1` is an experiment, not an operating mode.** It makes the code
+> mapper skip the vector store and ask the model to recall a code from its own
+> parametric knowledge, with no shortlist supplied. It exists to measure what
+> retrieval contributes, and it removes the guarantee that an emitted code
+> exists. Leave it unset for any real run:
+> ```bash
+> NO_RAG=1 python main.py --dataset mfu --clusters all --mapping-only
+> ```
 
 > **`FHIR_BASE_URL` is an identifier, not a link.** Nothing dereferences it — in
 > the same way `http://loinc.org` names LOINC without serving anything. It must
@@ -371,8 +413,10 @@ know them). If the server is unreachable, codes are marked `unchecked` — never
 | `FHIR_VALIDATOR_JAR` | `tools/validator_cli.jar` | Path to the jar |
 | `VALIDATOR_MAX_BUNDLES` | `25` | Bundles validated per run (`0` = all) |
 | `VALIDATOR_IG_PACKAGES` | *(empty)* | Extra IG packages, comma-separated |
+| `VALIDATOR_TIMEOUT_SEC` | `900` | Per-invocation timeout for the HL7 validator |
 | `CHECK_TERMINOLOGY` | `true` | Enable Validation 2 |
 | `TX_SERVER_URL` | `https://tx.fhir.org/r4` | Terminology server |
+| `TX_TIMEOUT_SEC` | `15` | Per-request timeout for the terminology server |
 
 ---
 
@@ -399,9 +443,18 @@ On **subsequent runs**, the vector store is loaded instantly from disk only the 
 | Package | Purpose |
 |---|---|
 | `anthropic` | Claude API for LLM code selection |
-| `langgraph` | Multi-agent pipeline orchestration |
+| `langgraph` | Pipeline orchestration (state graph) |
 | `chromadb` | Local vector store for terminology search |
 | `sentence-transformers` | Embedding model for semantic search |
 | `fhir.resources` | Pydantic-validated FHIR R4 resource models |
 | `pandas` | CSV parsing |
 | `rich` | Console output formatting |
+
+---
+
+## Licence
+
+Source code is released under the MIT Licence (see `LICENSE`). The licence covers
+the code only — not the study data, which is restricted-access and not
+distributed here, and not LOINC / SNOMED CT / RxNorm content, which carries its
+own terms of use. See "Data provenance and access" above.

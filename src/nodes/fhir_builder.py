@@ -399,7 +399,7 @@ def _process_condition(df, subjects, cluster_cfg, subject_models, cfg):
 
 
 def _process_medication(df, subjects, cluster_name, cluster_cfg, mapping_index, subject_models, cfg, rxnorm_lookup):
-    """Drug name → RxNorm code from the agent (mapping_index); curated seed lookup as fallback."""
+    """Drug name → RxNorm code from the mapping node (mapping_index); curated seed lookup as fallback."""
     id_col = cluster_cfg.get("id_col", "subject_id")
     date_col = cluster_cfg.get("date_col", "visit_date")
     drug_col = cluster_cfg.get("drug_col", "drug_name")
@@ -412,7 +412,7 @@ def _process_medication(df, subjects, cluster_name, cluster_cfg, mapping_index, 
             drug = str(r.get(drug_col, "")).strip()
             if not drug or drug.lower() == "nan":
                 continue
-            # 1) agent mapping (RxNorm RAG), 2) curated seed lookup, else text-only
+            # 1) mapped code (RxNorm RAG), 2) curated seed lookup, else text-only
             rx_code = None
             m = mapping_index.get(f"{cluster_name}::{drug}")
             if m and m.get("code") not in (None, "", "UNMAPPED"):
@@ -434,7 +434,7 @@ def _process_medication(df, subjects, cluster_name, cluster_cfg, mapping_index, 
 
 
 def _process_social_history(df, subjects, cluster_name, cluster_cfg, mapping_index, subject_models, cfg, local_system):
-    """Codes come from the agent (mapping_index); the smoking *value* uses a fixed SNOMED map."""
+    """Codes come from the mapping node (mapping_index); the smoking *value* uses a fixed SNOMED map."""
     id_col = cluster_cfg.get("id_col", "subject_id")
     date_col = cluster_cfg.get("date_col", "visit_date")
 

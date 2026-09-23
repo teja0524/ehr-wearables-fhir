@@ -20,7 +20,7 @@ CHROMA_DIR = BASE_DIR / ".chromadb"   # persisted vector store
 
 # Anthropic / Claude
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-# Model used by all agents. Haiku keeps the per-run cost low; bump to
+# Model used by the code-mapping node. Haiku keeps the per-run cost low; bump to
 # claude-sonnet-4-6 (or claude-opus-4-8) if mapping quality underperforms.
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
@@ -47,7 +47,14 @@ CHROMA_COLLECTION_LOINC: str = "loinc_terms"
 CHROMA_COLLECTION_SNOMED: str = "snomed_terms"
 CHROMA_COLLECTION_RXNORM: str = "rxnorm_terms"
 # no.of candidates to retrieve per query before Claude re-ranks
-VECTOR_TOP_K: int = 5
+VECTOR_TOP_K: int = int(os.getenv("VECTOR_TOP_K", "5"))
+
+# Retrieval ablation. When NO_RAG=1 the code-mapping node skips vector search
+# altogether and asks the model to recall a code from its own parametric
+# knowledge, with no shortlist supplied. This exists to measure what retrieval
+# contributes; it is not a supported operating mode. Defaults off, so an
+# unset environment reproduces the standard pipeline exactly.
+NO_RAG: bool = os.getenv("NO_RAG", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # Validation

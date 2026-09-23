@@ -16,10 +16,10 @@ from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
-from src.agents.code_mapper import map_codes
-from src.agents.fhir_builder import build_fhir
-from src.agents.schema_parser import parse_schema
-from src.agents.validator import validate_fhir
+from src.nodes.code_mapper import map_codes
+from src.nodes.fhir_builder import build_fhir
+from src.nodes.schema_parser import parse_schema
+from src.nodes.validator import validate_fhir
 from src.state import PipelineState
 from src.vector_store.store import TerminologyStore
 
@@ -131,6 +131,16 @@ def export_output(state: PipelineState, cfg: Any) -> PipelineState:
     mapping_report = {
         "summary": {
             "dataset": state.get("dataset", {}).get("name", ""),
+            # Exact model id used by the code-mapping node. Recorded so a report
+            # is self-describing: cross-model comparisons and cost figures are
+            # uninterpretable if the artefact does not say which model produced
+            # it. Model ids are pinned snapshots, so this is reproducible.
+            "model": state.get("model", ""),
+            # Retrieval settings for this run. Without these a C6/C7 report is
+            # byte-indistinguishable from a baseline one, and a NO_RAG report
+            # looks like a run where retrieval simply returned nothing.
+            "vector_top_k": getattr(cfg, "VECTOR_TOP_K", None),
+            "no_rag": bool(getattr(cfg, "NO_RAG", False)),
             "total_variables": len(all_mappings),
             "mapped_to_standard_code": len(mapped),
             "mapped_high_confidence": sum(1 for m in mapped if m.get("confidence") == "high"),

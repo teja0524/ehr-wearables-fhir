@@ -1,5 +1,5 @@
 """
-implementation of a multi-agent pipeline to transform EHR and wearables data
+implementation of a staged pipeline to transform EHR and wearables data
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="EHR/Wearables → FHIR R4 multi-agent transformation pipeline"
+        description="EHR/Wearables → FHIR R4 transformation pipeline"
     )
     parser.add_argument(
         "--dataset",
@@ -199,8 +199,8 @@ def main() -> int:
     # mapping report (no bundles are built). Fast way to inspect/iterate on
     # terminology coverage without the expensive FHIR build.
     if args.mapping_only:
-        from src.agents.schema_parser import parse_schema
-        from src.agents.code_mapper import map_codes
+        from src.nodes.schema_parser import parse_schema
+        from src.nodes.code_mapper import map_codes
 
         console.print("\n[bold]Mapping-only mode:[/bold] schema parse + code mapping (no bundles)\n")
         t1 = time.time()
@@ -222,9 +222,9 @@ def main() -> int:
         console.print(f"\n[bold]Mapping report:[/bold] [cyan]{report}[/cyan]")
         return 1 if state.get("errors") else 0
 
-    console.print("\n[bold]Step 2/5:[/bold] Building LangGraph agent pipeline...")
+    console.print("\n[bold]Step 2/5:[/bold] Building LangGraph pipeline...")
     pipeline = build_graph(cfg, store)
-    console.print("[green]✓[/green] Graph compiled (4 agent nodes + export)")
+    console.print("[green]✓[/green] Graph compiled (4 processing nodes + export)")
 
     console.print(f"\n[bold]Step 3-5/5:[/bold] Running pipeline on {args.clusters}...\n")
     t1 = time.time()

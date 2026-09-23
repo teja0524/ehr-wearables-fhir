@@ -1,5 +1,5 @@
 """
-Shared pipeline state flowing through all LangGraph agent nodes.
+Shared pipeline state flowing through all LangGraph nodes.
 Each node reads what it needs and writes its outputs back into the same dict.
 """
 

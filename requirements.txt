@@ -1,4 +1,4 @@
-# Core LLM / Agent framework
+# Core LLM / orchestration framework
 anthropic>=0.28.0
 langgraph>=0.2.0
 

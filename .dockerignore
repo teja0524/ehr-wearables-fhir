@@ -21,6 +21,13 @@ output/
 .chromadb/
 overrides/
 
+# Experiment artifacts and research data. runs/ and _archive/ hold subject-level
+# FHIR bundles from previous runs, and evaluation/ holds the annotation
+# worksheets and key. None of it belongs in an image.
+runs/
+_archive/
+evaluation/
+
 # OS cruft
 .DS_Store
 **/.DS_Store

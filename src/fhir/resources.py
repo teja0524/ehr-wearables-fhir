@@ -549,7 +549,7 @@ def observations_from_wide_row(
     One Observation is produced per parsed, non-null column.
 
     A column is only considered if the CodeMapper parsed it (i.e. it is in
-    mapping_index). If the agent returned UNMAPPED, the column is dropped unless
+    mapping_index). If the mapper returned UNMAPPED, the column is dropped unless
     local_fallback is set, in which case it is emitted under local_system using
     the variable name as the code — so coverage is preserved and traceable.
     part_of_ref, if provided, sets Observation.partOf for reverse linking.

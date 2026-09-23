@@ -22,6 +22,8 @@ data/
 # Generated artifacts
 output/
 .chromadb/
+runs/
+_archive/
 
 # Official HL7 FHIR validator jar (~150 MB) — downloaded, never committed
 *.jar
