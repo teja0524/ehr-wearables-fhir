@@ -19,27 +19,53 @@ Dictionary CSVs  →  SchemaParser  →  CodeMapper  →  FHIRBuilder  →  Vali
 ```
 fhir_mvp/
 ├── main.py                        # Entry point (--dataset selects the study)
+├── server.py                      # Flask dashboard: run the pipeline, view and correct results
 ├── config.py                      # Paths, model settings, DATASETS + cluster registries
-├── data/
-│   ├── sample_mfu/                # MFU/ComfortAge source CSVs (comma-delimited)
-│   ├── sample_ACE/                # ACE study CSVs (semicolon-delimited) + Excel dictionary
-│   └── terminology/               # LOINC, SNOMED, RxNorm seed CSVs
+├── requirements.txt
+├── Dockerfile, docker-compose.yml # Java + validator jar pre-installed
+├── .env.example                   # Copy to .env and add your API key
 ├── src/
 │   ├── graph.py                   # LangGraph pipeline definition
 │   ├── state.py                   # Shared pipeline state (carries the active dataset)
 │   ├── dictionary.py              # Unified dictionary loader (MFU CSV + ACE xlsx)
+│   ├── llm.py                     # Model access: Anthropic native, others via LiteLLM
+│   ├── overrides.py               # Persisted manual code corrections, re-applied each run
 │   ├── nodes/
-│   │   ├── schema_parser.py       # Node 1
-│   │   ├── code_mapper.py         # Node 2 (with on-disk mapping cache)
-│   │   ├── fhir_builder.py        # Node 3 (MFU + ACE strategies)
-│   │   └── validator.py           # Node 4
+│   │   ├── schema_parser.py       # Node 1 — variable population from the dictionaries
+│   │   ├── code_mapper.py         # Node 2 — retrieval + selection (on-disk mapping cache)
+│   │   ├── fhir_builder.py        # Node 3 — MFU + ACE resource strategies
+│   │   └── validator.py           # Node 4 — conformance + terminology checks
 │   ├── fhir/
 │   │   └── resources.py           # FHIR R4 resource factory
+│   ├── validation/
+│   │   ├── conformance.py         # Validation 1 — official HL7 validator_cli.jar
+│   │   └── terminology.py         # Validation 2 — $validate-code against a tx server
 │   └── vector_store/
 │       └── store.py               # ChromaDB terminology store
-└── output/                        # Generated FHIR bundles (git-ignored)
-    ├── mfu/                       # MFU bundles + mapping_report.json
-    └── ace/                       # ACE bundles + mapping_report.json
+├── tools/
+│   ├── umls_seed_builder.py       # Build / extend the terminology seeds from UMLS
+│   ├── build_annotation_set.py    # Build the evaluation annotation worksheet
+│   ├── evaluate_mapping.py        # Score mappings against the reference standard
+│   └── validator_cli.jar          # Downloaded, not committed (~150 MB)
+├── viewer/
+│   └── fhir_viewer.html           # Dashboard front-end, served by server.py
+├── docs/
+│   ├── annotation_protocol.md     # How the reference standard was produced
+│   └── README_umls_seed.md        # Seed-building notes
+│
+│   ### Not in version control — see .gitignore and "Data provenance and access"
+├── data/
+│   ├── sample_mfu/                # MFU source CSVs (comma-delimited)
+│   ├── sample_ACE/                # ACE CSVs (semicolon-delimited) + Excel dictionary
+│   └── terminology/               # LOINC, SNOMED CT, RxNorm seed CSVs
+├── output/                        # Generated FHIR bundles
+│   ├── mfu/                       # MFU bundles + mapping_report.json
+│   └── ace/                       # ACE bundles + mapping_report.json
+├── runs/                          # Archived experiment runs
+├── _archive/                      # Superseded outputs
+├── evaluation/                    # Annotation worksheets, key, evaluation results
+├── overrides/                     # Manual code corrections, written by the dashboard
+└── .chromadb/                     # Built vector store
 ```
 
 ---
@@ -62,13 +88,12 @@ node code changes are required for standard wide/long tables.
 
 ### Data provenance and access
 
-**No study data is included in this repository, and none should ever be added to
-it.** Both datasets are contributed by pilot studies of the COMFORTage Horizon
+**No study data is included in this repository.** Both datasets are contributed by pilot studies of the COMFORTage Horizon
 Europe project and are restricted-access: MFU comes from Pilot 7 (Faculty of
 Medicine, University of Ljubljana), ACE from Pilot 3 (Ace Alzheimer Center
 Barcelona). They contain pseudonymised participant records, including clinical,
 genetic and biomarker measurements. Obtaining them requires authorisation from
-the contributing pilot; they cannot be redistributed here or elsewhere.
+the contributing pilot; they cannot be redistributed here.
 
 `.gitignore` and `.dockerignore` exclude `data/`, generated bundles (`output/`,
 `runs/`, `_archive/`), the vector store (`.chromadb/`), the correction files
@@ -76,16 +101,16 @@ the contributing pilot; they cannot be redistributed here or elsewhere.
 data directory or output location, add it to both files before your first commit.
 
 The pipeline itself sends no subject-level data to any external service. The
-code mapper receives only variable-level metadata — column name, label, declared
-type, units and cluster — plus, for the two long-format clusters, the set of
+code mapper receives only variable-level metadata i.e. column name, label, declared
+type, units and cluster. Plus, for the two long-format clusters, the set of
 distinct metric names and each numeric metric's cohort-level minimum and
 maximum. Individual measurements are read only during local resource
 construction. The terminology server (Validation 2) receives codes only, never
-values.
+the values.
 
 Terminology seeds are also excluded, for licensing rather than privacy reasons:
 LOINC and SNOMED CT content carries its own terms of use, and SNOMED CT requires
-an affiliate licence in most territories. Supply the seeds yourself or
+an affiliate licence in most territories. Please do supply the seeds yourself or
 regenerate them from UMLS with `--enrich-seed` (see step 4 below).
 
 ---
@@ -101,7 +126,7 @@ them. What you need, and where to get it:
 | Python deps | via `requirements.txt` | `pip install -r requirements.txt` |
 | `.env` with API key | no | `cp .env.example .env`, then edit |
 | **Terminology seeds** (`data/terminology/*_seed.csv`) | **no** | Regenerate from UMLS (below), or request from the author |
-| **Study data** (`data/sample_mfu/`, `data/sample_ACE/`) | **no** | Supplied separately — contains study data |
+| **Study data** (`data/sample_mfu/`, `data/sample_ACE/`) | **no** | Must be obtained separately; contains study data |
 | FHIR validator jar | no | One `curl` (below); optional, pipeline degrades gracefully |
 
 Terminology seeds are excluded deliberately: SNOMED CT redistribution requires
